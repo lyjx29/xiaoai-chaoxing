@@ -218,12 +218,17 @@
         }).join(''));
     }
 
-    // 去掉 HTML 标签（保留 <img> 以便后续处理）
+    // 去掉 HTML 标签（keepImg=true 时保留 <img>，块级标签转为换行）
     function stripHtml(s, keepImg) {
         if (!s) return '';
         var html = String(s);
         if (keepImg) {
-            html = html.replace(/<(?!img|\/img|\/p|br)[^>]*>/g, '');
+            // 块级/换行标签 → 换行，保持题目阅读层次
+            html = html.replace(/<br\s*\/?>/gi, '\n')
+                .replace(/<\/(p|div|li|tr|h\d|ul|ol)>/gi, '\n')
+                .replace(/<(p|div|li|tr|h\d|ul|ol)[^>]*>/gi, '\n')
+                // 其余标签全部剥除，仅保留 <img>
+                .replace(/<(?!img|\/img)[^>]*>/g, '');
         } else {
             html = html.replace(/<[^>]*>/g, '');
         }
@@ -3919,6 +3924,7 @@
 
         // ---- 测验 ----
         work: 1, time: 2500, sub: 0, force: 0, decrypt: 1, redo: 0, fuzzyMatch: 1,
+        useCache: 1,                            // 本地答案缓存（测试时可关闭，只存高置信度）
         accuracy: 60,                           // 答题覆盖率阈值，达标才自动提交(%)
         randomDo: 0,                            // 无答案时随机选(B/全选/错) 模拟真人
 
@@ -4022,7 +4028,7 @@
      *           debugLog 静默、不持久化、不占存储。
      * 更新检测时请置 true，发布前务必改回 false。
      */
-    var DEV_MODE = false;
+    var DEV_MODE = true;
     // 允许运行时覆盖（测试/高级用法）：在脚本加载前设置 window.__XIAOAI_DEV_MODE__ = true
     try {
         if ((typeof unsafeWindow !== 'undefined' && unsafeWindow.__XIAOAI_DEV_MODE__) ||
@@ -4161,6 +4167,15 @@
             this._snapshots.push({ label: label, html: String(html || '').slice(0, 2000) });
         },
 
+        // 每种题型首次出现采样一份 HTML（DEV_MODE，帮助核对真实 DOM 结构）
+        _typeSampled: {},
+        sampleQuestion: function (typeName, html) {
+            if (!DEV_MODE) return;
+            if (this._typeSampled[typeName]) return;
+            this._typeSampled[typeName] = true;
+            this.snapshot('[采样] 题型: ' + typeName, html);
+        },
+
         // 关键选择器存在性探针：判断真实页面结构是否与适配器预期一致
         domProbe: function () {
             var probes = {};
@@ -4288,8 +4303,17 @@
                 }
                 GM_setValue('xiaoai_answers', JSON.stringify(all));
             } catch (e) { /* ignore */ }
+        },
+
+        clear: function () {
+            try { GM_setValue('xiaoai_answers', '{}'); } catch (e) { /* ignore */ }
+            try { logger('答案缓存已清空', 'orange'); } catch (e) { /* ignore */ }
         }
     };
+    // 控制台：__xiaoaiClearCache() 清空答案缓存（更新检测时避免旧答案回放）
+    try {
+        _w.__xiaoaiClearCache = function () { AnswerCache.clear(); return '答案缓存已清空'; };
+    } catch (e) { /* ignore */ }
 
     /* =========================== API 客户端 =========================== */
     var ApiClient = (function () {
@@ -4622,6 +4646,16 @@
         }
     };
 
+    // 是否属于可缓存的高置信度匹配（模糊匹配比例 <60% 不缓存，避免回放错误答案）
+    function isCacheableConfidence(conf) {
+        if (!conf) return false;
+        if (conf.indexOf('fuzzy') !== -1) {
+            var m = conf.match(/(\d+)%/);
+            return m && parseInt(m[1], 10) >= 60;
+        }
+        return true;
+    }
+
     /* =========================== 答案应用（把解析结果写入页面） =========================== */
     // adapter 提供 selectOption/highlightOption/fillBlanks/fillEssay/fillProgramming/showAnswerInTitle
     function applyAnswer(type, answer, options, $timu, adapter, settings) {
@@ -4725,6 +4759,7 @@
                 var questionText = adapter.getQuestionText($timu);
                 var options = adapter.getOptions($timu, typeInfo.type) || [];
                 logger(prefix + '[' + typeInfo.typeName + '] ' + (questionText || '').slice(0, 80), 'pink');
+                Report.sampleQuestion(typeInfo.typeName, $timu[0] ? $timu[0].outerHTML : '');
                 if (DEV_MODE) {
                     debugLog('题干全文: ' + questionText);
                     debugLog('选项(' + options.length + '): ' + options.join(' | '));
@@ -4741,8 +4776,8 @@
                     if (adapter.unselectAll) adapter.unselectAll($timu);
                 }
 
-                // 本地答案缓存命中
-                var cached = AnswerCache.get(questionText, typeInfo.type, options);
+                // 本地答案缓存命中（可关闭；只缓存高置信度，避免回放错误答案）
+                var cached = getSettingBool('useCache', !!CONFIG.useCache) ? AnswerCache.get(questionText, typeInfo.type, options) : null;
                 if (cached) {
                     logger(prefix + '命中本地缓存，直接作答', 'blue');
                     var cachedResult = applyAnswer(typeInfo.type, cached, options, $timu, adapter, settings);
@@ -4766,8 +4801,10 @@
 
                     var result = applyAnswer(typeInfo.type, answer, options, $timu, adapter, settings);
                     if (result.success) {
-                        // 匹配成功才写入缓存，避免坏答案污染
-                        AnswerCache.set(questionText, typeInfo.type, options, answer);
+                        // 匹配成功才写缓存，且仅高置信度（防止模糊匹配的错误答案被回放）
+                        if (getSettingBool('useCache', !!CONFIG.useCache) && isCacheableConfidence(result.confidence)) {
+                            AnswerCache.set(questionText, typeInfo.type, options, answer);
+                        }
                         logger(prefix + '自动答题成功 [' + result.confidence + ']', 'green');
                         _answeredCount++;
                         resolve({ success: true, reason: 'answered', confidence: result.confidence });
@@ -6664,6 +6701,7 @@
                 '<label><input type="checkbox" id="GPTJsSetting.redo">重做模式</label>' +
                 '<label><input type="checkbox" id="GPTJsSetting.randomDo">无答案时随机选(B/全选/错)</label>' +
                 '<label><input type="checkbox" id="GPTJsSetting.fuzzyMatch" checked>相似度匹配</label>' +
+                '<label><input type="checkbox" id="GPTJsSetting.useCache" checked>答案缓存(省API)</label>' +
                 '<label><input type="checkbox" id="GPTJsSetting.decrypt" checked>字体解密</label>' +
                 '<label><input type="checkbox" id="GPTJsSetting.antiDetect" checked>防检测</label>' +
                 '</div>' +
@@ -6766,7 +6804,7 @@
         },
 
         _initSettings: function () {
-            var checkboxes = ['sub', 'force', 'examTurn', 'goodStudent', 'alterTitle', 'redo', 'randomDo', 'fuzzyMatch', 'decrypt', 'antiDetect', 'jsonMode'];
+            var checkboxes = ['sub', 'force', 'examTurn', 'goodStudent', 'alterTitle', 'redo', 'randomDo', 'fuzzyMatch', 'useCache', 'decrypt', 'antiDetect', 'jsonMode'];
             checkboxes.forEach(function (id) {
                 var cb = document.getElementById('GPTJsSetting.' + id);
                 if (!cb) return;

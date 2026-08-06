@@ -61,6 +61,23 @@ test('normalizeOptionText 去字母前缀', function () {
     expectEqual(Core.normalizeOptionText('C．FTP'), 'FTP');
 });
 
+test('stripHtml 清除 </p> 垃圾标签（真实页面选项带 </p>）', function () {
+    expectEqual(Core.normalizeOptionText('</p>80</p></p>'), '80');
+    expectEqual(Core.normalizeOptionText('</p>在内存寻找指定的文件</p></p>'), '在内存寻找指定的文件');
+});
+
+test('tidyQuestion 清除结尾 </p> 与前导空白', function () {
+    expectEqual(Core.tidyQuestion('\n\t\t\t若文件f1的硬链接为f2,正确的是(   )。</p>'), '若文件f1的硬链接为f2,正确的是(   )。');
+});
+
+test('tidyQuestion 复合题干保留换行层次', function () {
+    var q = Core.tidyQuestion('<p>Ⅰ.f1和f2指针相同</p><p>Ⅱ.f1和f2共享inode</p><p>Ⅲ.fd指向打开文件表</p>');
+    expectEqual(q.indexOf('\n') !== -1, true);
+    expectEqual(q.indexOf('Ⅰ') !== -1, true);
+    expectEqual(q.indexOf('Ⅱ') !== -1, true);
+    expectEqual(q.indexOf('Ⅲ') !== -1, true);
+});
+
 test('clearString 保留中英文数字', function () {
     expectEqual(Core.clearString('TCP/IP 协议 (v4)'), 'tcpip协议v4');
 });

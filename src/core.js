@@ -170,12 +170,17 @@
         }).join(''));
     }
 
-    // 去掉 HTML 标签（保留 <img> 以便后续处理）
+    // 去掉 HTML 标签（keepImg=true 时保留 <img>，块级标签转为换行）
     function stripHtml(s, keepImg) {
         if (!s) return '';
         var html = String(s);
         if (keepImg) {
-            html = html.replace(/<(?!img|\/img|\/p|br)[^>]*>/g, '');
+            // 块级/换行标签 → 换行，保持题目阅读层次
+            html = html.replace(/<br\s*\/?>/gi, '\n')
+                .replace(/<\/(p|div|li|tr|h\d|ul|ol)>/gi, '\n')
+                .replace(/<(p|div|li|tr|h\d|ul|ol)[^>]*>/gi, '\n')
+                // 其余标签全部剥除，仅保留 <img>
+                .replace(/<(?!img|\/img)[^>]*>/g, '');
         } else {
             html = html.replace(/<[^>]*>/g, '');
         }
