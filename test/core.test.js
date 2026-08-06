@@ -326,6 +326,27 @@ test('AiResponseParser JSON模式(多选)', function () {
     expectDeep(r.answers, ['TCP/IP协议', 'HTTP协议']);
 });
 
+test('AiResponseParser 判断：answer是语义、answers是字母时优先answer（真实Q40）', function () {
+    var r = Core.AiResponseParser.parse({ raw: '{"answer":"错误","answers":["B"]}', type: 3, jsonMode: true });
+    expectEqual(r.answer, '错误');
+    expectEqual(Core.matchJudge(r.answer).isTrue, false);
+});
+
+test('AiResponseParser 判断：answer是字母B（真实Q37）', function () {
+    var r = Core.AiResponseParser.parse({ raw: '{"answer":"B","answers":["B"]}', type: 3, jsonMode: true });
+    expectEqual(Core.matchJudge(r.answer).isTrue, false);
+});
+
+test('parseJudgeAnswer 认 A/B 字母', function () {
+    expectEqual(Core.parseJudgeAnswer('A'), 'true');
+    expectEqual(Core.parseJudgeAnswer('B'), 'false');
+    expectEqual(Core.parseJudgeAnswer('a'), 'true');
+    expectEqual(Core.parseJudgeAnswer('b'), 'false');
+    // 不误伤含字母的正常答案（含"正确"仍判 true，字母 B 不触发字母分支）
+    expectEqual(Core.parseJudgeAnswer('正确的做法是选择B项'), 'true');
+    expectEqual(Core.parseJudgeAnswer('B不适用'), null); // 纯文本含B但不含对/错词 → 无法判断
+});
+
 test('AiResponseParser 短文本清洗', function () {
     var r = Core.AiResponseParser.parse({ raw: '答案：UDP协议。', type: 0, jsonMode: false });
     expectEqual(r.answer, 'UDP协议');

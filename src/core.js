@@ -290,6 +290,9 @@
         // 精确匹配（否定优先）
         for (var i = 0; i < falseWords.length; i++) { if (s === falseWords[i]) return 'false'; }
         for (var i = 0; i < trueWords.length; i++) { if (s === trueWords[i]) return 'true'; }
+        // 判断题选项字母约定：A=正确/对，B=错误/错（仅精确单字母，避免误伤普通文本）
+        if (s === 'a') return 'true';
+        if (s === 'b') return 'false';
         // 包含匹配（否定词优先）
         for (var j = 0; j < falseWords.length; j++) { if (s.indexOf(falseWords[j]) !== -1) return 'false'; }
         for (var k = 0; k < trueWords.length; k++) { if (s.indexOf(trueWords[k]) !== -1) return 'true'; }
@@ -727,10 +730,20 @@
             if (jsonMode) {
                 var obj = this.parseJson(raw);
                 if (obj) {
+                    var answerStr = obj.answer !== undefined ? String(obj.answer).trim() : '';
                     var answers = [];
-                    if (Array.isArray(obj.answers)) answers = obj.answers.map(function (x) { return String(x); });
-                    if (obj.answer !== undefined && answers.length === 0) answers.push(String(obj.answer));
-                    return { answer: answers.length > 0 ? answers.join('|') : '', answers: answers, raw: raw, json: true };
+                    if (Array.isArray(obj.answers)) answers = obj.answers.map(function (x) { return String(x).trim(); }).filter(Boolean);
+
+                    if (type === 1) {
+                        // 多选：优先用 answers 数组（或 answer 按 | 拆）
+                        if (answers.length === 0 && answerStr) answers = answerStr.split('|');
+                        var multiAns = answers.join('|');
+                        return { answer: multiAns, answers: answers, raw: raw, json: true };
+                    } else {
+                        // 单选/判断/填空：优先 answer 字段（防止 answer 是语义值、answers 却是选项字母）
+                        var ans = answerStr || (answers.length ? answers[0] : '');
+                        return { answer: ans, answers: answers.length ? answers : (ans ? [ans] : []), raw: raw, json: true };
+                    }
                 }
             }
 

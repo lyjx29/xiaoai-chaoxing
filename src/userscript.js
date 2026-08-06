@@ -612,6 +612,10 @@
                 _dailyCount++;
                 if (DEV_MODE) debugLog('← AI 原始返回(' + raw.length + '字符): ' + raw.slice(0, 600));
                 var parsed = Core.AiResponseParser.parse({ raw: raw, type: type, jsonMode: useJson });
+                // JSON 模式但返回超长非 JSON（推理模型泄出）：视为失败，触发降级重试
+                if (useJson && parsed.json === false && raw.length > 500) {
+                    throw { c: 0, msg: 'JSON 模式返回超长非JSON响应，降级重试' };
+                }
                 var answer = parsed.answer;
                 updateLogEntry($thinking, '答案: ' + (answer || '(空)'), 'purple');
                 if (DEV_MODE) debugLog('→ 解析结果: ' + (answer || '(空)') + (parsed.json ? ' [JSON]' : ' [文本]'));
