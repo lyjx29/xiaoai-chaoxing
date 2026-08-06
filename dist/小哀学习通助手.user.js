@@ -5,6 +5,15 @@
 // @version      1.1.0
 // @description  学习通/超星全自动助手：自带 API Key 直连 AI（默认 deepseek-v4-flash），自动完成视频/音频/文档/阅读/读书/直播/速课/测验/作业/考试；支持单选/多选/判断/填空/简答/论述/写作/翻译/编程/复合大题；字体解密、防清进度、拟人化答题、答案加粗好学生模式。在设置面板填入你的 API Key 即可使用。
 // @author       小哀
+// @tag          学习通
+// @tag          超星
+// @tag          自动答题
+// @tag          刷课
+// @tag          视频挂机
+// @tag          作业
+// @tag          考试
+// @tag          deepseek
+// @tag          openai
 // @license      MIT
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDE2IDE2Ij48dGV4dCB4PSIwIiB5PSIxMyIgZm9udC1zaXplPSIxNCI+5bCP5oK8PC90ZXh0Pjwvc3ZnPg==
 // @match        *://*.chaoxing.com/*
