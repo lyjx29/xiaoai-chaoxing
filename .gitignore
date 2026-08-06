@@ -1,0 +1,11 @@
+node_modules/
+package-lock.json
+*.log
+.DS_Store
+
+# 参考资料（其他作者的脚本，含历史密钥，不提交）
+ABC.js
+chat.js
+减负.js
+超星.js
+chaoxing.js
