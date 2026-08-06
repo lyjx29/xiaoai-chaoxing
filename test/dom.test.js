@@ -206,37 +206,31 @@ async function main() {
     });
 
     console.log('\n===== 简答题 端到端（拟学生语言） =====\n');
-    await test('简答：学生口吻在第③步(提取整理)生效', async function () {
+    await test('简答：AI返回正文，填入textarea', async function () {
         const body = '<div class="mark_table"><form>' +
             '<div class="questionLi" typename="简答题">' +
             '<h3 class="mark_name">(简答题) 简述TCP三次握手过程</h3>' +
             '<div class="stem_answer"><textarea name="answerEditor1"></textarea></div>' +
             '</div></div></form></div>';
         const win = makeWindow(body, '/xiaoai-test');
+        mockAI(win, '客户端先发SYN，服务端回SYN+ACK，客户端再确认，连接就建立了。');
         const T = win.__XIAOAI_TEST__;
+        // 捕获实际发给 AI 的 prompt，验证拟学生语言
         win.__XIAOAI_PROMPTS__ = [];
-        let call = 0;
-        const contents = [
-            '题目要求简述TCP三次握手过程。',
-            '第一次客户端发SYN，第二次服务端回SYN+ACK，第三次客户端确认，连接建立。',
-            '【答案】第一次客户端发送SYN，服务端回应SYN+ACK，客户端最后确认，三次握手完成，连接建立。【/答案】'
-        ];
+        const orig = win.GM_xmlhttpRequest;
         win.GM_xmlhttpRequest = function (opts) {
-            call++;
-            win.__XIAOAI_PROMPTS__.push(JSON.parse(opts.data));
-            const b = { choices: [{ message: { content: contents[Math.min(call - 1, contents.length - 1)] } }] };
-            setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(b) }); }, 5);
+            const data = JSON.parse(opts.data);
+            win.__XIAOAI_PROMPTS__.push(data);
+            orig(opts);
         };
         const r = await T.QuizEngine.processOne(0, 1, win.jQuery('.questionLi'), T.HomeworkAdapter, {});
         if (!r.success) throw new Error('processOne 未成功');
         const ta = win.document.querySelector('textarea');
         if (ta.value.indexOf('SYN') === -1) throw new Error('答案未填入');
-        // 学生口吻应在第③步(提取整理)的 prompt 里，而非第①步
-        const step3System = win.__XIAOAI_PROMPTS__[2].messages[0].content;
-        if (step3System.indexOf('学生口吻') === -1) throw new Error('第③步未要求学生口吻');
-        if (step3System.indexOf('【答案】') === -1) throw new Error('第③步未要求【答案】标记');
-        const step1System = win.__XIAOAI_PROMPTS__[0].messages[0].content;
-        if (step1System.indexOf('只分析题目') === -1) throw new Error('第①步应是读题分析');
+        // 验证 prompt 里的学生口吻要求
+        const systemText = win.__XIAOAI_PROMPTS__[0].messages[0].content;
+        if (systemText.indexOf('普通学生') === -1) throw new Error('主观题未使用学生口吻 prompt');
+        if (systemText.indexOf('套话') === -1) throw new Error('未要求避免套话');
     });
 
     console.log('\n===== 编程题 端到端 =====\n');
@@ -455,8 +449,8 @@ async function main() {
         if (lastLabel.textContent.indexOf('UDP') === -1) throw new Error('排除法应改选 UDP，实际最后选: ' + lastLabel.textContent + ' (点击序列 ' + JSON.stringify(clicks) + ')');
     });
 
-    console.log('\n===== 简答题三步流水线 =====\n');
-    await test('简答三步：读题→解答→提取整理，只填标记内内容', async function () {
+    console.log('\n===== 简答题两段式 =====\n');
+    await test('简答两段式：草稿→誊抄→提取【答案】标记内容填入', async function () {
         const body = '<div class="mark_table"><form>' +
             '<div class="questionLi" typename="简答题"><h3 class="mark_name">(简答题) 计算寻道时间</h3>' +
             '<div class="stem_answer"><textarea name="answerEditor1"></textarea></div>' +
@@ -464,12 +458,10 @@ async function main() {
         const win = makeWindow(body, '/mooc2/work/dowork?courseid=1');
         let calls = 0;
         const contents = [
-            // ①读题
-            '题目要求计算FCFS和电梯算法的寻道次序；已知：起始柱面20，请求序列10,22,20,2,40,6,38，每柱面6ms。',
-            // ②解答（允许思考，可能是长推理）
-            '我们只需要输出答案正文。需要计算两种算法。从20开始，FCFS按到达顺序20->10->22...（大段计算过程）',
-            // ③提取整理：干净分点 + 标记
-            '整理：\n【答案】\n(1) 先来先服务：10,22,20\n(2) 电梯算法：20,22,38\n【/答案】'
+            // 第一段：推理泄出的草稿
+            '我们只需要输出答案正文。需要计算寻道时间。从柱面20开始，请求序列10,22,20,2,40,6,38。先来先服务按到达顺序...（大段思考）',
+            // 第二段：AI 自定格式 + 标记
+            '整理如下：\n【答案】\n(1) 先来先服务：10,22,20\n(2) 电梯算法：20,22,38\n【/答案】\n以上就是最终答案'
         ];
         win.GM_xmlhttpRequest = function (opts) {
             calls++;
@@ -479,70 +471,17 @@ async function main() {
         const T = win.__XIAOAI_TEST__;
         const r = await T.QuizEngine.processOne(0, 1, win.jQuery('.questionLi'), T.HomeworkAdapter, {});
         if (!r.success) throw new Error('processOne 未成功');
-        if (calls !== 3) throw new Error('三步流水线应调用3次API，实际 ' + calls);
+        if (calls !== 2) throw new Error('两段式应调用2次API，实际 ' + calls);
         const ta = win.document.querySelector('textarea');
         const val = ta.value;
-        // 只填标记内内容
+        // 应填入标记内的内容（干净、分点、带换行），而不是推理草稿
         if (val.indexOf('(1) 先来先服务') === -1) throw new Error('未填入标记内答案: ' + val);
-        if (val.indexOf('需要计算两种算法') !== -1) throw new Error('解答的思考过程被填进去了!');
+        if (val.indexOf('我们只需要输出答案正文') !== -1) throw new Error('推理草稿被填进去了!');
         if (val.indexOf('【答案】') !== -1) throw new Error('标记本身被填入!');
         if (val.indexOf('\n') === -1) throw new Error('分点换行丢失: ' + JSON.stringify(val));
     });
 
-    await test('简答三步：第③步提取混乱→自动重试成功', async function () {
-        const body = '<div class="mark_table"><form>' +
-            '<div class="questionLi" typename="简答题"><h3 class="mark_name">(简答题) CSCAN</h3>' +
-            '<div class="stem_answer"><textarea name="answerEditor1"></textarea></div>' +
-            '</div></div></form></div>';
-        const win = makeWindow(body, '/mooc2/work/dowork?courseid=1');
-        let calls = 0;
-        const contents = [
-            '题目要求计算CSCAN时间，已知转速6000转/分，请求50,80,20,110。',
-            'CSCAN从100向增大方向移动，先服务110，回到最小磁道再服务20,50,80。（完整计算过程）',
-            '我们只需要整理格式。需要重新分析CSCAN。让我想想...', // ③第一次：混乱
-            '整理：\n【答案】\n访问次序：110 → 20 → 50 → 80\n总时间：寻道+旋转延迟\n【/答案】' // ③重试：成功
-        ];
-        win.GM_xmlhttpRequest = function (opts) {
-            calls++;
-            const b = { choices: [{ message: { content: contents[Math.min(calls - 1, contents.length - 1)] } }] };
-            setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(b) }); }, 5);
-        };
-        const T = win.__XIAOAI_TEST__;
-        const r = await T.QuizEngine.processOne(0, 1, win.jQuery('.questionLi'), T.HomeworkAdapter, {});
-        if (!r.success) throw new Error('重试后应成功');
-        if (calls !== 4) throw new Error('读题+解答+③重试应调用4次，实际 ' + calls);
-        const ta = win.document.querySelector('textarea');
-        if (ta.value.indexOf('访问次序：110') === -1) throw new Error('重试后未填入答案: ' + ta.value);
-        if (ta.value.indexOf('让我想想') !== -1) throw new Error('混乱内容被填入!');
-    });
-
-    await test('简答三步：第③步始终混乱→不填，标记需手动作答', async function () {
-        const body = '<div class="mark_table"><form>' +
-            '<div class="questionLi" typename="简答题"><h3 class="mark_name">(简答题) 难题</h3>' +
-            '<div class="stem_answer"><textarea name="answerEditor1"></textarea></div>' +
-            '</div></div></form></div>';
-        const win = makeWindow(body, '/mooc2/work/dowork?courseid=1');
-        let calls = 0;
-        win.GM_xmlhttpRequest = function (opts) {
-            calls++;
-            if (calls <= 2) {
-                // ①读题、②解答正常
-                const b = { choices: [{ message: { content: calls === 1 ? '题目要求计算' : '完整解答过程（大段思考）' } }] };
-                setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(b) }); }, 5);
-            } else {
-                // ③始终混乱
-                const b = { choices: [{ message: { content: '我们只需要整理格式。需要重新计算。让我想想...' } }] };
-                setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(b) }); }, 5);
-            }
-        };
-        const T = win.__XIAOAI_TEST__;
-        const r = await T.QuizEngine.processOne(0, 1, win.jQuery('.questionLi'), T.HomeworkAdapter, {});
-        if (r.success) throw new Error('③始终混乱应标记失败');
-        const ta = win.document.querySelector('textarea');
-        if (ta.value.trim() !== '') throw new Error('失败时不应填入思考过程，实际: ' + ta.value);
-    });
-
-    await test('简答三步：第①步读题失败→跳过直接解答', async function () {
+    await test('简答两段式：第二段失败退回第一段草稿', async function () {
         const body = '<div class="mark_table"><form>' +
             '<div class="questionLi" typename="简答题"><h3 class="mark_name">(简答题) 名词解释</h3>' +
             '<div class="stem_answer"><textarea name="answerEditor1"></textarea></div>' +
@@ -552,24 +491,18 @@ async function main() {
         win.GM_xmlhttpRequest = function (opts) {
             calls++;
             if (calls === 1) {
-                // ①失败：500
-                setTimeout(function () { opts.onload({ status: 500, responseText: 'error' }); }, 5);
-            } else if (calls === 2) {
-                // ②解答（无分析）
                 const b = { choices: [{ message: { content: '进程是程序的一次执行过程，是系统进行资源分配的基本单位。' } }] };
                 setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(b) }); }, 5);
             } else {
-                // ③提取整理
-                const b = { choices: [{ message: { content: '【答案】进程是程序的一次执行过程，是系统进行资源分配和调度的基本单位。【/答案】' } }] };
-                setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(b) }); }, 5);
+                // 第二段失败：返回 500
+                setTimeout(function () { opts.onload({ status: 500, responseText: 'error' }); }, 5);
             }
         };
         const T = win.__XIAOAI_TEST__;
         const r = await T.QuizEngine.processOne(0, 1, win.jQuery('.questionLi'), T.HomeworkAdapter, {});
-        if (!r.success) throw new Error('跳过分析后应成功');
-        if (calls !== 3) throw new Error('应调用3次(跳过①后②③)，实际 ' + calls);
+        if (!r.success) throw new Error('processOne 未成功');
         const ta = win.document.querySelector('textarea');
-        if (ta.value.indexOf('进程是程序的一次执行过程') === -1) throw new Error('未填入答案: ' + ta.value);
+        if (ta.value.indexOf('进程是程序的一次执行过程') === -1) throw new Error('未退回第一段草稿: ' + ta.value);
     });
 
     console.log('\n===== AI 确认投票 =====\n');
