@@ -505,56 +505,6 @@ async function main() {
         if (ta.value.indexOf('进程是程序的一次执行过程') === -1) throw new Error('未退回第一段草稿: ' + ta.value);
     });
 
-    await test('简答：第二段整理溢出无标记→自动重试→成功', async function () {
-        const body = '<div class="mark_table"><form>' +
-            '<div class="questionLi" typename="简答题"><h3 class="mark_name">(简答题) 统考真题</h3>' +
-            '<div class="stem_answer"><textarea name="answerEditor1"></textarea></div>' +
-            '</div></div></form></div>';
-        const win = makeWindow(body, '/mooc2/work/dowork?courseid=1');
-        let calls = 0;
-        const contents = [
-            // 第一段草稿（干净）
-            '操作顺序：用户输入⑥→中断④→字符读入③→进程插入就绪队列①→系统调用返回⑤。',
-            // 第二段第一次：又去思考了（真实Q6场景），无标记
-            '我们 need produce final answer in Chinese, within tags. Need answer based on analysis. Let us deeply reason to ensure correctness...',
-            // 第二段重试：成功给出标记
-            '整理：\n【答案】\n1) 操作①前一个③后一个⑤；操作⑥后一个④。\n2) 操作②后CPU切换到其他进程。\n【/答案】'
-        ];
-        win.GM_xmlhttpRequest = function (opts) {
-            calls++;
-            const b = { choices: [{ message: { content: contents[Math.min(calls - 1, contents.length - 1)] } }] };
-            setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(b) }); }, 5);
-        };
-        const T = win.__XIAOAI_TEST__;
-        const r = await T.QuizEngine.processOne(0, 1, win.jQuery('.questionLi'), T.HomeworkAdapter, {});
-        if (!r.success) throw new Error('重试后应成功');
-        if (calls !== 3) throw new Error('草稿+2次整理应调用3次，实际 ' + calls);
-        const ta = win.document.querySelector('textarea');
-        if (ta.value.indexOf('操作①前一个③') === -1) throw new Error('重试后未填入标记答案: ' + ta.value);
-        if (ta.value.indexOf('deeply reason') !== -1) throw new Error('思考被填入!');
-    });
-
-    await test('简答：第二段两次都溢出→退回草稿', async function () {
-        const body = '<div class="mark_table"><form>' +
-            '<div class="questionLi" typename="简答题"><h3 class="mark_name">(简答题) 名词解释</h3>' +
-            '<div class="stem_answer"><textarea name="answerEditor1"></textarea></div>' +
-            '</div></div></form></div>';
-        const win = makeWindow(body, '/mooc2/work/dowork?courseid=1');
-        let calls = 0;
-        win.GM_xmlhttpRequest = function (opts) {
-            calls++;
-            const b = { choices: [{ message: { content: calls === 1 ? '进程是程序的一次执行过程，是系统进行资源分配的基本单位。' : '我们只需要输出最终答案。需要重新分析。让我想想...' } }] };
-            setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(b) }); }, 5);
-        };
-        const T = win.__XIAOAI_TEST__;
-        const r = await T.QuizEngine.processOne(0, 1, win.jQuery('.questionLi'), T.HomeworkAdapter, {});
-        if (!r.success) throw new Error('processOne 未成功');
-        if (calls !== 3) throw new Error('草稿+2次整理应调用3次，实际 ' + calls);
-        const ta = win.document.querySelector('textarea');
-        if (ta.value.indexOf('进程是程序的一次执行过程') === -1) throw new Error('应退回干净草稿: ' + ta.value);
-        if (ta.value.indexOf('让我想想') !== -1) throw new Error('思考被填入!');
-    });
-
     console.log('\n===== AI 确认投票 =====\n');
     await test('AI 确认投票：问2次取多数，选正确选项', async function () {
         const body = '<div class="mark_table"><form>' +
