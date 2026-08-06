@@ -707,45 +707,45 @@
         });
     }
 
-    // 判断整理后的答案是否"干净"（短、无思考痕迹）
+    // 判断整理后的答案是否"干净"（短、无中英文思考痕迹）
     function isCleanEssayAnswer(text) {
         if (!text) return false;
         var s = String(text).trim();
         if (s.length > 1200) return false;
-        if (/我们(只需要|需要|先|再看|可以)|让我(们)?(算|看|分析)|需要计算|我的思路|首先我/.test(s)) return false;
+        if (/我们(只需要|需要|先|再看|可以)|让我(们)?(算|看|分析)|需要计算|我的思路|首先我|we (need|must)|let('s| us) (deeply )?reason|need (to )?(solve|answer|compute|calculate|produce|respond|reason)|to ensure correctness/i.test(s)) return false;
         return true;
     }
 
-    // 兜底提取：从"答案/结论/因此"等关键词后取剩余内容
-    function extractTrailingEssay(text) {
-        if (!text) return null;
-        var m = String(text).match(/(?:最终答案|答案是|答案为|因此|所以|结论)[：:，,]?\s*([\s\S]{5,})$/);
-        if (m && m[1].trim()) return m[1].trim();
-        return null;
+    // 第二段"誊抄"：提取标记 / 干净整段；无结果则重试一次（整理是低负荷，重试常能成功）
+    // 不做"关键词截取"兜底——那会误抓思考尾巴（如"我们只需要输出最终答案..."被截成垃圾）
+    function attemptReformat(rp, draft, retryCount) {
+        return getRawAnswer(rp, retryCount ? '简答·第二段整理重试' : '简答·第二段整理').then(function (raw2) {
+            if (DEV_MODE) debugLog('【简答·第二段整理' + (retryCount ? '重试' : '') + '】' + raw2.slice(0, 150));
+            var marked = Core.extractAnswerSection(raw2);
+            if (marked) return marked;
+            if (isCleanEssayAnswer(raw2)) return raw2;
+            if (retryCount === 0) {
+                logger('简答整理未产出干净答案，重试一次', 'orange');
+                return attemptReformat(rp, draft, 1);
+            }
+            logger('简答两次整理仍无干净答案，退回草稿', 'orange');
+            return draft;
+        }).catch(function () {
+            if (retryCount === 0) {
+                logger('简答整理请求失败，重试一次', 'orange');
+                return attemptReformat(rp, draft, 1);
+            }
+            logger('简答整理失败，退回草稿', 'orange');
+            return draft;
+        });
     }
 
-    // 简答/论述/计算/翻译：始终两段式（草稿 → AI 自定格式誊抄 → 标记提取）
+    // 简答/论述/计算/翻译：两段式（草稿 → AI 自定格式誊抄 → 标记提取，整理可重试一次）
     function answerEssay(type, question, prompt) {
         return getRawAnswer(prompt, '简答·第一段草稿').then(function (draft) {
             if (DEV_MODE) debugLog('【简答·第一段草稿】' + draft.slice(0, 150));
             var rp = Core.PromptBuilder.buildReformat(question, draft);
-            return getRawAnswer(rp, '简答·第二段整理').then(function (raw2) {
-                if (DEV_MODE) debugLog('【简答·第二段整理】' + raw2.slice(0, 150));
-                // 1) 优先提取【答案】标记内的内容（AI 自定边界）
-                var marked = Core.extractAnswerSection(raw2);
-                if (marked) return marked;
-                // 2) 无标记但干净 → 整段
-                if (isCleanEssayAnswer(raw2)) return raw2;
-                // 3) 无标记且混乱 → 关键词兜底
-                var fb = extractTrailingEssay(raw2);
-                if (fb) return fb;
-                // 4) 全失败 → 退回第一段草稿
-                logger('简答整理异常，退回第一段草稿', 'orange');
-                return draft;
-            }).catch(function () {
-                logger('简答第二段整理失败，退回第一段草稿', 'orange');
-                return draft;
-            });
+            return attemptReformat(rp, draft, 0);
         });
     }
 
