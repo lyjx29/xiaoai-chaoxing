@@ -698,6 +698,47 @@
         },
 
         /**
+         * 简答三步流水线——第①步：读题理解
+         * 让 AI 先明确题目要求/已知条件/待求项，暴露信息缺失
+         */
+        buildEssayRead: function (question) {
+            var system = '你是解题分析助手。只分析题目，不要解答。';
+            var user = '【题目】\n' + question + '\n\n请分析并输出：\n' +
+                '1. 题目要求我们做什么\n' +
+                '2. 已知条件有哪些\n' +
+                '3. 需要求什么（若有多个小问请分别列出）\n' +
+                '4. 若题目中有图片/图表，说明图片提供了什么信息、是否影响解题、信息是否完整。\n' +
+                '只输出你的分析，不要解答。';
+            return { system: system, user: user };
+        },
+
+        /**
+         * 简答三步流水线——第②步：解答
+         * 根据分析完整解答，允许自由推理和计算过程（不压制思考）
+         */
+        buildEssaySolve: function (question, analysis) {
+            var system = '你是解题助手。根据题目分析，完整解答题目。可以直接写出推理和计算过程，尽量详细完整。';
+            var user = '【题目】\n' + question + '\n\n【题目分析】\n' + (analysis || '（无）') + '\n\n请完整解答。';
+            return { system: system, user: user };
+        },
+
+        /**
+         * 简答三步流水线——第③步：提取答案并整理格式
+         * 从解题内容中提取真正回答题目的内容，整理成学生口吻的分点格式
+         */
+        buildEssayFormat: function (question, solution) {
+            var system = '你是作业提交助手，把解题内容整理成最终提交的答案。要求：\n' +
+                '1. 从解题内容中只保留真正回答题目的内容，去掉"我们只需要""让我想想""需要计算"等思考痕迹；计算题保留关键计算步骤和最终结果\n' +
+                '2. 把最终答案放在【答案】和【/答案】两个标记之间，标记之间就是要提交的全部内容\n' +
+                '3. 标记内的格式由你灵活决定：可以分点、编号、列步骤、换行\n' +
+                '4. 计算题建议按 已知条件→公式→代入计算→最终结果 组织，每个小问单独一块\n' +
+                '5. 用自然的学生口吻，不要像标准答案一样生硬，不要出现"草稿""整理""AI"等词\n' +
+                '6. 标记之外不要输出任何内容';
+            var user = '【题目】\n' + question + '\n\n【解题内容】\n' + solution + '\n\n请提取答案并整理成最终格式。';
+            return { system: system, user: user };
+        },
+
+        /**
          * 简答题两段式：第二段"誊抄"prompt
          * 让 AI 把草稿整理成最终答案，并用【答案】标记划出要提交的内容（格式由 AI 自定）
          */
@@ -4644,58 +4685,54 @@
         return true;
     }
 
-    // 判断是否"思考溢出"（模型在自言自语/描述思路，没直接作答）——只看开头，避免误伤正常答案
-    function isReasoningSpill(text) {
-        if (!text) return true;
-        var head = String(text).trim().slice(0, 90);
-        return /我们只需要|我们 need|need (to )?(solve|answer|compute|calculate|respond|parse|understand)|需要(计算|理解|判断|确定|先|重新)|让我们|我的思路|首先我|让我(们)?(算|看|分析)/i.test(head);
+    // 第③步：提取答案并整理格式（含一次重试）
+    function doExtractFormat(question, solution) {
+        var rp = Core.PromptBuilder.buildEssayFormat(question, solution);
+        function attempt(retry) {
+            return getRawAnswer(rp, retry ? '简答·③提取整理重试' : '简答·③提取整理').then(function (raw3) {
+                if (DEV_MODE) debugLog('【简答·③提取整理】' + raw3.slice(0, 150));
+                var marked = Core.extractAnswerSection(raw3);
+                if (marked) return { answer: marked, source: retry ? 'marked-retry' : 'marked' };
+                if (isCleanEssayAnswer(raw3)) return { answer: raw3, source: retry ? 'clean-retry' : 'clean' };
+                if (retry) return { answer: '', source: 'failed', failed: true };
+                logger('简答提取整理异常，重试一次', 'orange');
+                return attempt(true);
+            }).catch(function () {
+                if (retry) return { answer: '', source: 'failed', failed: true };
+                logger('简答提取整理失败，重试一次', 'orange');
+                return attempt(true);
+            });
+        }
+        return attempt(false);
     }
 
-    // 兜底提取：从"答案/结论/因此"等关键词后取剩余内容
-    function extractTrailingEssay(text) {
-        if (!text) return null;
-        var m = String(text).match(/(?:最终答案|答案是|答案为|因此|所以|结论)[：:，,]?\s*([\s\S]{5,})$/);
-        if (m && m[1].trim()) return m[1].trim();
-        return null;
-    }
-
-    // 第二段"誊抄"：提取标记 / 干净整段 / 关键词兜底 / 否则视为失败
-    function doReformat(question, draft) {
-        var rp = Core.PromptBuilder.buildReformat(question, draft);
-        return getRawAnswer(rp, '简答·第二段整理').then(function (raw2) {
-            if (DEV_MODE) debugLog('【简答·第二段整理】' + raw2.slice(0, 150));
-            var marked = Core.extractAnswerSection(raw2);
-            if (marked) return { answer: marked, source: 'marked' };
-            if (isCleanEssayAnswer(raw2)) return { answer: raw2, source: 'clean' };
-            var fb = extractTrailingEssay(raw2);
-            if (fb) return { answer: fb, source: 'keyword' };
-            // 第二段也是思考溢出：草稿干净则退回草稿，否则标记失败（不填思考）
-            if (isReasoningSpill(draft)) return { answer: '', source: 'failed', failed: true };
-            logger('简答整理异常，退回第一段草稿', 'orange');
-            return { answer: draft, source: 'draft' };
-        }).catch(function () {
-            logger('简答第二段整理失败，退回第一段草稿', 'orange');
-            if (isReasoningSpill(draft)) return { answer: '', source: 'failed', failed: true };
-            return { answer: draft, source: 'draft' };
-        });
-    }
-
-    // 简答/论述/计算/翻译：始终两段式（草稿 → AI 自定格式誊抄 → 标记提取）
-    // 返回 { answer, source, failed }
-    function answerEssay(type, question, prompt) {
-        return getRawAnswer(prompt, '简答·第一段草稿').then(function (draft) {
-            if (DEV_MODE) debugLog('【简答·第一段草稿】' + draft.slice(0, 150));
-            // 第一段就思考溢出 → 重试一次（溢出有随机性，重试常能拿到干净草稿）
-            if (isReasoningSpill(draft)) {
-                logger('简答第一段出现思考溢出，重试一次', 'orange');
-                return getRawAnswer(prompt, '简答·第一段重试').then(function (draft2) {
-                    if (DEV_MODE) debugLog('【简答·第一段重试】' + draft2.slice(0, 150));
-                    return doReformat(question, draft2);
+    // 简答/论述/计算/翻译：三步流水线（①读题理解 → ②解答 → ③提取整理）
+    // 返回 { answer, source, failed }；①②是内部过程，只有③的输出填入
+    function answerEssay(question) {
+        // 第①步：读题理解
+        return getRawAnswer(Core.PromptBuilder.buildEssayRead(question), '简答·①读题').then(function (analysis) {
+            if (DEV_MODE) debugLog('【简答·①读题】' + analysis.slice(0, 150));
+            // 第②步：解答
+            return getRawAnswer(Core.PromptBuilder.buildEssaySolve(question, analysis), '简答·②解答').then(function (solution) {
+                if (DEV_MODE) debugLog('【简答·②解答】' + solution.slice(0, 150));
+                return doExtractFormat(question, solution);
+            }).catch(function () {
+                // 第②步失败：用"无分析"再试一次解答
+                logger('简答解答失败，重试一次', 'orange');
+                return getRawAnswer(Core.PromptBuilder.buildEssaySolve(question, ''), '简答·②解答重试').then(function (solution2) {
+                    return doExtractFormat(question, solution2);
                 }).catch(function () {
                     return { answer: '', source: 'failed', failed: true };
                 });
-            }
-            return doReformat(question, draft);
+            });
+        }).catch(function () {
+            // 第①步失败：跳过分析直接解答
+            logger('简答读题分析失败，跳过分析直接解答', 'orange');
+            return getRawAnswer(Core.PromptBuilder.buildEssaySolve(question, ''), '简答·②解答').then(function (solution) {
+                return doExtractFormat(question, solution);
+            }).catch(function () {
+                return { answer: '', source: 'failed', failed: true };
+            });
         });
     }
 
@@ -5025,7 +5062,7 @@
 
                 // 简答/论述/计算/翻译：走两段式（草稿→誊抄），不影响客观题
                 if ([4, 5, 7, 8].indexOf(typeInfo.type) !== -1) {
-                    answerEssay(typeInfo.type, questionText, prompt).then(function (final) {
+                    answerEssay(questionText).then(function (final) {
                         // 全失败（多次思考溢出）：不填思考，标记供用户手动作答
                         if (final.failed || !final.answer) {
                             updateLogEntry($thinking, 'AI 多次思考溢出未能生成有效答案，请手动作答', 'red');
