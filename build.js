@@ -10,7 +10,7 @@ const { execFileSync } = require('child_process');
 
 const SRC = __dirname;
 const DIST = path.join(SRC, 'dist');
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 
 const HEADER = `// ==UserScript==
 // @name         小哀学习通助手（自有AI·自动答题/刷课）

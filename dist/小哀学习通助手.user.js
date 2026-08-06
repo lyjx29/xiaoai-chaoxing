@@ -2,7 +2,7 @@
 // @name         小哀学习通助手（自有AI·自动答题/刷课）
 // @name:en      XiaoAi Chaoxing Assistant
 // @namespace    xiaoai.chaoxing
-// @version      1.0.0
+// @version      1.1.0
 // @description  学习通/超星全自动助手：自带 API Key 直连 AI（默认 deepseek-v4-flash），自动完成视频/音频/文档/阅读/读书/直播/速课/测验/作业/考试；支持单选/多选/判断/填空/简答/论述/写作/翻译/编程/复合大题；字体解密、防清进度、拟人化答题、答案加粗好学生模式。在设置面板填入你的 API Key 即可使用。
 // @author       小哀
 // @license      MIT
