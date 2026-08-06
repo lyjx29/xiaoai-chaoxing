@@ -66,6 +66,20 @@ test('stripHtml 清除 </p> 垃圾标签（真实页面选项带 </p>）', funct
     expectEqual(Core.normalizeOptionText('</p>在内存寻找指定的文件</p></p>'), '在内存寻找指定的文件');
 });
 
+test('罗马数字在 stripPunc/clearString 中保留（不塌缩；统一转小写）', function () {
+    expectEqual(Core.stripPunc('仅Ⅱ , Ⅳ'), '仅ⅱⅳ');
+    expectEqual(Core.clearString('仅Ⅱ , Ⅳ'), '仅ⅱⅳ');
+});
+
+test('罗马数字选项匹配（真实Q54：AI答"仅Ⅱ , Ⅳ"应选B而非塌缩到第一个）', function () {
+    var opts = ['仅Ⅱ', '仅Ⅱ , Ⅳ', '仅Ⅲ , Ⅳ', '仅 I ,Ⅱ , Ⅳ'];
+    var r = Core.matchSingle('仅Ⅱ , Ⅳ', opts, 0.45);
+    expectEqual(r.index, 1);
+    // 反向：AI答"仅Ⅲ , Ⅳ"也应选对
+    var r2 = Core.matchSingle('仅Ⅲ , Ⅳ', opts, 0.45);
+    expectEqual(r2.index, 2);
+});
+
 test('tidyQuestion 清除结尾 </p> 与前导空白', function () {
     expectEqual(Core.tidyQuestion('\n\t\t\t若文件f1的硬链接为f2,正确的是(   )。</p>'), '若文件f1的硬链接为f2,正确的是(   )。');
 });

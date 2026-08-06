@@ -233,17 +233,19 @@
     }
 
     // 去除所有标点与空白（用于精确比对）
+    // 保留中英文字母、数字、以及罗马数字 Ⅰ-Ⅻ / ⅰ-ⅻ（U+2160-U+216B / U+2170-U+217B）
+    // —— 否则「仅Ⅱ , Ⅳ」这类选项会被剥离成"仅"，导致塌缩错配（真实 Q54 bug）
     function stripPunc(s) {
         if (!s) return '';
-        return String(s).replace(/[一-龥A-Za-z0-9]/g, function (m) { return m; })
-            .replace(/[^一-龥A-Za-z0-9]/g, '')
+        return String(s)
+            .replace(/[^一-龥A-Za-z0-9Ⅰ-Ⅻⅰ-ⅻ]/g, '')
             .toLowerCase();
     }
 
-    // 保留中英文与数字，去其余字符（用于模糊匹配前归一）
+    // 保留中英文与数字（含罗马数字），去其余字符（用于模糊匹配前归一）
     function clearString(s) {
         if (!s) return '';
-        return String(s).replace(/[^一-龥a-zA-Z0-9]/g, '').toLowerCase();
+        return String(s).replace(/[^一-龥a-zA-Z0-9Ⅰ-Ⅻⅰ-ⅻ]/g, '').toLowerCase();
     }
 
     // 去掉常见冗余后缀（方式/方法/技术/协议/机制 等）

@@ -281,17 +281,19 @@
     }
 
     // 去除所有标点与空白（用于精确比对）
+    // 保留中英文字母、数字、以及罗马数字 Ⅰ-Ⅻ / ⅰ-ⅻ（U+2160-U+216B / U+2170-U+217B）
+    // —— 否则「仅Ⅱ , Ⅳ」这类选项会被剥离成"仅"，导致塌缩错配（真实 Q54 bug）
     function stripPunc(s) {
         if (!s) return '';
-        return String(s).replace(/[一-龥A-Za-z0-9]/g, function (m) { return m; })
-            .replace(/[^一-龥A-Za-z0-9]/g, '')
+        return String(s)
+            .replace(/[^一-龥A-Za-z0-9Ⅰ-Ⅻⅰ-ⅻ]/g, '')
             .toLowerCase();
     }
 
-    // 保留中英文与数字，去其余字符（用于模糊匹配前归一）
+    // 保留中英文与数字（含罗马数字），去其余字符（用于模糊匹配前归一）
     function clearString(s) {
         if (!s) return '';
-        return String(s).replace(/[^一-龥a-zA-Z0-9]/g, '').toLowerCase();
+        return String(s).replace(/[^一-龥a-zA-Z0-9Ⅰ-Ⅻⅰ-ⅻ]/g, '').toLowerCase();
     }
 
     // 去掉常见冗余后缀（方式/方法/技术/协议/机制 等）
@@ -4057,8 +4059,8 @@
 
     var Logger = {
         _buffer: [],
-        MAX_BUFFER: 1500,       // 内存环形缓冲上限
-        PERSIST_MAX: 500,       // 持久化到 GM 的上限
+        MAX_BUFFER: 4000,       // 内存环形缓冲上限（覆盖长作业/考试全程）
+        PERSIST_MAX: 2000,      // 持久化到 GM 的上限
 
         init: function () {
             if (!DEV_MODE) return; // 发布版不加载历史日志
@@ -4237,8 +4239,8 @@
                 domProbe: this.domProbe(),
                 errors: this._errors,
                 questionSnapshots: this._snapshots,
-                // log 用数组逐行存放，编辑器打开即可按行阅读
-                log: Logger._buffer.map(function (l) { return l.msg; })
+                // log 用数组逐行存放（带时间戳），编辑器打开即可按行阅读
+                log: Logger._buffer.map(function (l) { return '[' + l.time + '] ' + l.msg; })
             };
         },
 
@@ -4894,17 +4896,19 @@
                     });
                 }
 
-                function applyVoteIndex(idx, voteAnswer, voteCount) {
+                function applyVoteIndices(indices, voteAnswer, voteCount) {
                     var alterTitle = settings.alterTitle !== undefined ? settings.alterTitle : getSettingBool('alterTitle', !!CONFIG.alterTitle);
                     var goodStudent = getSettingBool('goodStudent', !!CONFIG.goodStudent);
                     if (alterTitle && voteAnswer) adapter.showAnswerInTitle($timu, voteAnswer);
-                    if (goodStudent) adapter.highlightOption($timu, idx);
-                    else adapter.selectOption($timu, idx);
+                    indices.forEach(function (idx) {
+                        if (goodStudent) adapter.highlightOption($timu, idx);
+                        else adapter.selectOption($timu, idx);
+                    });
                     // 至少 2 票一致才算高置信，可写缓存
                     if (voteAnswer && voteCount >= 2 && getSettingBool('useCache', !!CONFIG.useCache)) {
                         AnswerCache.set(questionText, typeInfo.type, options, voteAnswer);
                     }
-                    logger(prefix + '投票作答成功 [选项' + idx + ']', 'green');
+                    logger(prefix + '投票作答成功 [选项' + indices.join(',') + ']', 'green');
                     _answeredCount++;
                     resolve({ success: true, reason: 'answered', confidence: 'vote' });
                 }
@@ -4942,19 +4946,34 @@
                             votes.forEach(function (vo) {
                                 vo.indices.forEach(function (i) { countMap[i] = (countMap[i] || 0) + 1; });
                             });
-                            var bestIdx = -1, bestCount = 0;
+                            var majority = Math.ceil(voteTimes / 2);
+                            var bestIndices = [];
+                            var bestCount = 0;
                             for (var k in countMap) {
-                                if (countMap[k] > bestCount) { bestCount = countMap[k]; bestIdx = +k; }
+                                if (countMap[k] > bestCount) bestCount = countMap[k];
                             }
-                            if (bestIdx === -1) {
+                            if (typeInfo.type === 1) {
+                                // 多选：收集所有达到多数票的选项
+                                for (var k2 in countMap) {
+                                    if (countMap[k2] >= majority) bestIndices.push(+k2);
+                                }
+                            } else {
+                                // 单选/判断：取单数最高
+                                if (bestCount >= majority) {
+                                    for (var k3 in countMap) {
+                                        if (countMap[k3] === bestCount) { bestIndices.push(+k3); break; }
+                                    }
+                                }
+                            }
+                            if (bestIndices.length === 0) {
                                 logger(prefix + '投票无一致匹配，视为失败', 'red');
                                 randomAnswer(typeInfo.type, options, adapter, $timu);
                                 return resolve({ success: false, reason: 'vote_no_match' });
                             }
                             var voteAnswer = '';
-                            votes.forEach(function (vo) { if (vo.indices.indexOf(bestIdx) !== -1 && !voteAnswer) voteAnswer = vo.answer; });
-                            if (DEV_MODE) debugLog('投票结果: 选项[' + bestIdx + '] ' + options[bestIdx] + ' 得票 ' + bestCount + '/' + voteTimes);
-                            return applyVoteIndex(bestIdx, voteAnswer, bestCount);
+                            votes.forEach(function (vo) { if (vo.indices.length && !voteAnswer) voteAnswer = vo.answer; });
+                            if (DEV_MODE) debugLog('投票结果: 选项[' + bestIndices.join(',') + '] (' + options.map(function (o, i) { return bestIndices.indexOf(i) !== -1 ? o : ''; }).filter(Boolean).join(' | ') + ') 得票 ' + bestCount + '/' + voteTimes);
+                            return applyVoteIndices(bestIndices, voteAnswer, bestCount);
                         }
                         askOnce().then(function (vo) {
                             votes.push(vo);

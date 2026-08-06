@@ -478,6 +478,35 @@ async function main() {
         if (!clicked || clicked.textContent.indexOf('UDP') === -1) throw new Error('投票未选中 UDP');
     });
 
+    await test('多选投票：收集全部多数选项（真实Q60场景）', async function () {
+        const body = '<div class="mark_table"><form>' +
+            '<div class="questionLi" typename="多选题"><h3 class="mark_name">(多选题) 改善磁盘I/O性能的是？</h3>' +
+            '<div class="stem_answer">' +
+            '<div class="wrap" style="cursor:pointer;"><span></span><div class="answer_p">重排I/O请求次序</div></div>' +
+            '<div class="wrap" style="cursor:pointer;"><span></span><div class="answer_p">在一个磁盘上设置多个分区</div></div>' +
+            '<div class="wrap" style="cursor:pointer;"><span></span><div class="answer_p">预读和滞后写</div></div>' +
+            '<div class="wrap" style="cursor:pointer;"><span></span><div class="answer_p">优化文件物理块的分布</div></div>' +
+            '</div></div></form></div>';
+        const win = makeWindow(body, '/mooc2/work/dowork?courseid=1');
+        win.localStorage.setItem('GPTJsSetting.aiVote', '1'); // 问 2 次
+        let calls = 0;
+        const answer = '{"answer":"重排I/O请求次序|预读和滞后写|优化文件物理块的分布","answers":["重排I/O请求次序","预读和滞后写","优化文件物理块的分布"]}';
+        win.GM_xmlhttpRequest = function (opts) {
+            calls++;
+            const b = { choices: [{ message: { content: answer } }] };
+            setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(b) }); }, 5);
+        };
+        win.document.querySelectorAll('.wrap').forEach(function (el, i) {
+            el.addEventListener('click', function () { el.setAttribute('data-clicked', String(i)); });
+        });
+        const T = win.__XIAOAI_TEST__;
+        const r = await T.QuizEngine.processOne(0, 1, win.jQuery('.questionLi'), T.HomeworkAdapter, {});
+        if (!r.success) throw new Error('processOne 未成功');
+        const clicked = Array.prototype.map.call(win.document.querySelectorAll('.wrap[data-clicked]'), function (el) { return +el.getAttribute('data-clicked'); }).sort();
+        // 应选中 0(A),2(C),3(D)，而不是只选一个
+        if (clicked.join(',') !== '0,2,3') throw new Error('多选投票应选 A,C,D(0,2,3)，实际 ' + JSON.stringify(clicked));
+    });
+
     await test('aiVote=0 时只询问1次（不额外花钱）', async function () {
         const body = '<div class="mark_table"><form>' +
             '<div class="questionLi" typename="单选题"><h3 class="mark_name">(单选题) 测试</h3>' +
