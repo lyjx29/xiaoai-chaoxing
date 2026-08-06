@@ -25,6 +25,7 @@
 // @connect      api.anthropic.com
 // @connect      api.moonshot.cn
 // @connect      api.ollama.com
+// @connect      api.github.com
 // @connect      cdn.ocsjs.com
 // @connect      www.forestpolice.org
 // @connect      cs.dkjdda.top
@@ -6378,6 +6379,7 @@
             Logger.init();
             Report.init();
             UIManager.init();
+            Updater.check();
 
             if (getSettingBool('decrypt', !!CONFIG.decrypt)) {
                 FontDecryptor.decrypt();
@@ -6948,6 +6950,9 @@
                 '#ne-21box .ne21-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;cursor:move;user-select:none;border-bottom:1px solid rgba(15,23,42,.07);}' +
                 '#ne-21box.ne21-collapsed .ne21-body{display:none;}' +
                 '#ne-21box .ne21-title{display:flex;align-items:center;gap:9px;font-weight:600;font-size:14px;margin:0;}' +
+                '#ne-21box .ne21-ver{margin-left:6px;font-size:10px;font-weight:500;color:rgba(15,23,42,.45);background:rgba(15,23,42,.06);border:1px solid rgba(15,23,42,.08);border-radius:6px;padding:1px 5px;}' +
+                '#ne-21box .xiaoai-update{margin-top:8px;padding:7px 10px;font-size:12px;color:#b45309;background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.3);border-radius:10px;}' +
+                '#ne-21box .xiaoai-update a{margin-left:6px;color:#d97706;font-weight:600;text-decoration:none;}' +
                 '#ne-21box .ne21-dot{width:9px;height:9px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff,rgba(15,23,42,.3));flex-shrink:0;}' +
                 '#ne-21box #ne-21close{margin:0;width:24px;height:24px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;border:1px solid rgba(255,255,255,.65);border-radius:50%;background:rgba(255,255,255,.55);}' +
                 '#ne-21box .ne21-body{padding:14px 16px 16px;}' +
@@ -6974,7 +6979,7 @@
         _getHTML: function () {
             return '<div id="ne-21box">' +
                 '<div class="ne21-header" title="按住标题栏可拖动">' +
-                '<h3 class="ne21-title"><span class="ne21-dot"></span>小哀学习通助手</h3>' +
+                '<h3 class="ne21-title"><span class="ne21-dot"></span>小哀学习通助手<span class="ne21-ver">v' + Updater.currentVersion() + '</span></h3>' +
                 '<button id="ne-21close" type="button" aria-label="收起">−</button>' +
                 '</div>' +
                 '<div class="ne21-body">' +
@@ -7177,6 +7182,69 @@
         }
     };
 
+    /* =========================== 版本更新检测 =========================== */
+    var Updater = {
+        REPO: 'lyjx29/xiaoai-chaoxing',
+
+        currentVersion: function () {
+            try { return GM_info.script.version || '0.0.0'; } catch (e) { return '0.0.0'; }
+        },
+
+        _toNum: function (v) {
+            var m = String(v).match(/(\d+)\.(\d+)\.(\d+)/);
+            return m ? (+m[1]) * 10000 + (+m[2]) * 100 + (+m[3]) : 0;
+        },
+
+        // 检测 GitHub 最新版本；每 12 小时查一次，避免频繁请求
+        check: function (force) {
+            try {
+                var last = parseInt(Storage.get('updateChecked', '0'), 10) || 0;
+                if (!force && Date.now() - last < 12 * 3600 * 1000) {
+                    this._renderNotice();
+                    return;
+                }
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: 'https://api.github.com/repos/' + this.REPO + '/releases/latest',
+                    headers: { 'Accept': 'application/vnd.github+json' },
+                    timeout: 15000,
+                    onload: function (xhr) {
+                        if (xhr.status === 200) {
+                            try {
+                                var obj = JSON.parse(xhr.responseText);
+                                var latest = obj.tag_name || '';
+                                Storage.set('updateChecked', String(Date.now()));
+                                if (latest && Updater._toNum(latest) > Updater._toNum(Updater.currentVersion())) {
+                                    Storage.set('updateAvailable', latest);
+                                } else {
+                                    Storage.set('updateAvailable', '');
+                                }
+                                Updater._renderNotice();
+                            } catch (e) { /* ignore */ }
+                        }
+                    },
+                    onerror: function () {},
+                    ontimeout: function () {}
+                });
+            } catch (e) { /* ignore */ }
+        },
+
+        _renderNotice: function () {
+            var latest = Storage.get('updateAvailable', '');
+            if (!latest) return;
+            try {
+                var $notice = $('#ne-21notice');
+                if ($notice.length && $notice.find('.xiaoai-update').length === 0) {
+                    $notice.append(
+                        '<div class="xiaoai-update">发现新版本 <b>' + latest + '</b>（当前 v' + Updater.currentVersion() + '）' +
+                        '<a href="https://github.com/' + Updater.REPO + '/releases" target="_blank">查看更新</a></div>'
+                    );
+                    logger('发现新版本 ' + latest + '，可去项目页查看更新', 'green');
+                }
+            } catch (e) { /* ignore */ }
+        }
+    };
+
     /* =========================== Bootstrap =========================== */
     try {
         if (_l.pathname.indexOf('/work/phone/doHomeWork') !== -1 &&
@@ -7201,7 +7269,7 @@
                 MediaHandler: MediaHandler, VideoQuizHandler: VideoQuizHandler,
                 AntiDetect: AntiDetect, FontDecryptor: FontDecryptor,
                 getSetting: getSetting, setSetting: setSetting,
-                CONFIG: CONFIG, Storage: Storage, logger: logger, Report: Report
+                CONFIG: CONFIG, Storage: Storage, logger: logger, Report: Report, Updater: Updater
             };
         }
     } catch (e) { /* ignore */ }

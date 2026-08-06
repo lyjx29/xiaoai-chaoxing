@@ -621,6 +621,44 @@ async function main() {
         if (r !== null) throw new Error('非开发模式不应导出报告');
     });
 
+    console.log('\n===== 版本更新检测 =====\n');
+    await test('版本检测：发现新版本(v9.9.9)并记录', async function () {
+        const win = makeWindow('<div></div>', '/xiaoai-test');
+        const T = win.__XIAOAI_TEST__;
+        win.GM_xmlhttpRequest = function (opts) {
+            const body = { tag_name: 'v9.9.9' };
+            setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(body) }); }, 5);
+        };
+        T.Updater.check(true); // 强制检查，绕过 12h 缓存
+        await wait(30);
+        if (T.Storage.get('updateAvailable', '') !== 'v9.9.9') throw new Error('未检测到新版本: ' + T.Storage.get('updateAvailable', ''));
+    });
+
+    await test('版本检测：与当前版本相同则不提示', async function () {
+        const win = makeWindow('<div></div>', '/xiaoai-test');
+        const T = win.__XIAOAI_TEST__;
+        win.GM_info.script.version = '9.9.9'; // 当前版本设为 9.9.9
+        win.GM_xmlhttpRequest = function (opts) {
+            const body = { tag_name: 'v9.9.9' };
+            setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(body) }); }, 5);
+        };
+        T.Updater.check(true);
+        await wait(30);
+        if (T.Storage.get('updateAvailable', '') !== '') throw new Error('相同版本不应提示更新');
+    });
+
+    await test('版本检测：网络失败不崩溃', async function () {
+        const win = makeWindow('<div></div>', '/xiaoai-test');
+        const T = win.__XIAOAI_TEST__;
+        win.GM_xmlhttpRequest = function (opts) {
+            setTimeout(function () { opts.onerror({}); }, 5);
+        };
+        T.Updater.check(true);
+        await wait(30);
+        // 不应抛异常，updateAvailable 应为空
+        if (T.Storage.get('updateAvailable', '') !== '') throw new Error('网络失败不应误报更新');
+    });
+
     /* ======================= 汇总 ======================= */
     console.log('\n========================================');
     console.log('  通过: ' + passed + '  失败: ' + failed + '  共: ' + (passed + failed));

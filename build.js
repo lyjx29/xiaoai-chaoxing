@@ -39,6 +39,7 @@ const HEADER = `// ==UserScript==
 // @connect      api.anthropic.com
 // @connect      api.moonshot.cn
 // @connect      api.ollama.com
+// @connect      api.github.com
 // @connect      cdn.ocsjs.com
 // @connect      www.forestpolice.org
 // @connect      cs.dkjdda.top
