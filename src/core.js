@@ -646,8 +646,38 @@
             }
 
             return { system: system, user: userMsg };
+        },
+
+        /**
+         * 简答题两段式：第二段"誊抄"prompt
+         * 让 AI 把草稿整理成最终答案，并用【答案】标记划出要提交的内容（格式由 AI 自定）
+         */
+        buildReformat: function (question, draft) {
+            var system = '你是一名中国大学的普通学生，正在把作业草稿整理成最终答案提交。要求：\n' +
+                '1. 把最终答案放在【答案】和【/答案】两个标记之间，标记之间就是要提交的全部内容。\n' +
+                '2. 标记内的格式由你自己根据题目灵活决定：可以分点、编号、列步骤、写公式、换行。\n' +
+                '3. 计算题建议按 已知条件→公式→代入计算→最终结果 组织；若你认为其他格式更合适也可以。\n' +
+                '4. 保留自然的学生口吻，不要像标准答案一样生硬，也不要出现"草稿""整理""AI"等词。\n' +
+                '5. 标记之外不要输出任何内容。';
+            var user = '【题目】\n' + question + '\n\n【我的草稿】\n' + draft + '\n\n请整理成最终答案。';
+            return { system: system, user: user };
         }
     };
+
+    // 从文本中提取【答案】...【/答案】标记之间的内容（AI 自定答案边界）
+    function extractAnswerSection(text) {
+        if (!text) return null;
+        var s = String(text).trim();
+        var m = s.match(/【答案】([\s\S]*?)【\/答案】/);
+        if (m && m[1].trim()) return m[1].trim();
+        // 只有开标记：取其后全部
+        m = s.match(/【答案】([\s\S]*)$/);
+        if (m && m[1].trim()) return m[1].trim();
+        // 兼容"答案："形式
+        m = s.match(/(?:最终答案|答案)[：:]\s*([\s\S]*)$/);
+        if (m && m[1].trim()) return m[1].trim();
+        return null;
+    }
 
     /* ======================= AI 响应解析 ======================= */
 
@@ -836,6 +866,7 @@
 
         PromptBuilder: PromptBuilder,
         AiResponseParser: AiResponseParser,
-        answerCacheKey: answerCacheKey
+        answerCacheKey: answerCacheKey,
+        extractAnswerSection: extractAnswerSection
     };
 });

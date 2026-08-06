@@ -327,6 +327,28 @@ test('PromptBuilder 编程题代码块', function () {
     expectEqual(p.system.indexOf('```代码块```') !== -1, true);
 });
 
+test('PromptBuilder.buildReformat 第二段誊抄含标记指令', function () {
+    var p = Core.PromptBuilder.buildReformat('计算寻道时间', '草稿内容');
+    expectEqual(p.system.indexOf('【答案】') !== -1, true);
+    expectEqual(p.system.indexOf('格式由你自己') !== -1, true);
+    expectEqual(p.user.indexOf('【我的草稿】') !== -1, true);
+    expectEqual(p.user.indexOf('草稿内容') !== -1, true);
+});
+
+test('extractAnswerSection 提取标记内内容', function () {
+    var text = '好的，我来整理。\n【答案】\n(1) 先来先服务：10,22,20\n(2) 电梯算法：20,22,38\n【/答案】\n以上就是最终答案';
+    expectEqual(Core.extractAnswerSection(text), '(1) 先来先服务：10,22,20\n(2) 电梯算法：20,22,38');
+});
+
+test('extractAnswerSection 只有开标记取其后', function () {
+    var text = '【答案】最终答案正文\n换行内容';
+    expectEqual(Core.extractAnswerSection(text), '最终答案正文\n换行内容');
+});
+
+test('extractAnswerSection 无标记返回 null', function () {
+    expectEqual(Core.extractAnswerSection('没有任何标记的文本'), null);
+});
+
 console.log('\n===== AI 响应解析 =====\n');
 
 test('AiResponseParser JSON模式', function () {

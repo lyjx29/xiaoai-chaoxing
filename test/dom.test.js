@@ -449,6 +449,62 @@ async function main() {
         if (lastLabel.textContent.indexOf('UDP') === -1) throw new Error('排除法应改选 UDP，实际最后选: ' + lastLabel.textContent + ' (点击序列 ' + JSON.stringify(clicks) + ')');
     });
 
+    console.log('\n===== 简答题两段式 =====\n');
+    await test('简答两段式：草稿→誊抄→提取【答案】标记内容填入', async function () {
+        const body = '<div class="mark_table"><form>' +
+            '<div class="questionLi" typename="简答题"><h3 class="mark_name">(简答题) 计算寻道时间</h3>' +
+            '<div class="stem_answer"><textarea name="answerEditor1"></textarea></div>' +
+            '</div></div></form></div>';
+        const win = makeWindow(body, '/mooc2/work/dowork?courseid=1');
+        let calls = 0;
+        const contents = [
+            // 第一段：推理泄出的草稿
+            '我们只需要输出答案正文。需要计算寻道时间。从柱面20开始，请求序列10,22,20,2,40,6,38。先来先服务按到达顺序...（大段思考）',
+            // 第二段：AI 自定格式 + 标记
+            '整理如下：\n【答案】\n(1) 先来先服务：10,22,20\n(2) 电梯算法：20,22,38\n【/答案】\n以上就是最终答案'
+        ];
+        win.GM_xmlhttpRequest = function (opts) {
+            calls++;
+            const b = { choices: [{ message: { content: contents[Math.min(calls - 1, contents.length - 1)] } }] };
+            setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(b) }); }, 5);
+        };
+        const T = win.__XIAOAI_TEST__;
+        const r = await T.QuizEngine.processOne(0, 1, win.jQuery('.questionLi'), T.HomeworkAdapter, {});
+        if (!r.success) throw new Error('processOne 未成功');
+        if (calls !== 2) throw new Error('两段式应调用2次API，实际 ' + calls);
+        const ta = win.document.querySelector('textarea');
+        const val = ta.value;
+        // 应填入标记内的内容（干净、分点、带换行），而不是推理草稿
+        if (val.indexOf('(1) 先来先服务') === -1) throw new Error('未填入标记内答案: ' + val);
+        if (val.indexOf('我们只需要输出答案正文') !== -1) throw new Error('推理草稿被填进去了!');
+        if (val.indexOf('【答案】') !== -1) throw new Error('标记本身被填入!');
+        if (val.indexOf('\n') === -1) throw new Error('分点换行丢失: ' + JSON.stringify(val));
+    });
+
+    await test('简答两段式：第二段失败退回第一段草稿', async function () {
+        const body = '<div class="mark_table"><form>' +
+            '<div class="questionLi" typename="简答题"><h3 class="mark_name">(简答题) 名词解释</h3>' +
+            '<div class="stem_answer"><textarea name="answerEditor1"></textarea></div>' +
+            '</div></div></form></div>';
+        const win = makeWindow(body, '/mooc2/work/dowork?courseid=1');
+        let calls = 0;
+        win.GM_xmlhttpRequest = function (opts) {
+            calls++;
+            if (calls === 1) {
+                const b = { choices: [{ message: { content: '进程是程序的一次执行过程，是系统进行资源分配的基本单位。' } }] };
+                setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(b) }); }, 5);
+            } else {
+                // 第二段失败：返回 500
+                setTimeout(function () { opts.onload({ status: 500, responseText: 'error' }); }, 5);
+            }
+        };
+        const T = win.__XIAOAI_TEST__;
+        const r = await T.QuizEngine.processOne(0, 1, win.jQuery('.questionLi'), T.HomeworkAdapter, {});
+        if (!r.success) throw new Error('processOne 未成功');
+        const ta = win.document.querySelector('textarea');
+        if (ta.value.indexOf('进程是程序的一次执行过程') === -1) throw new Error('未退回第一段草稿: ' + ta.value);
+    });
+
     console.log('\n===== AI 确认投票 =====\n');
     await test('AI 确认投票：问2次取多数，选正确选项', async function () {
         const body = '<div class="mark_table"><form>' +

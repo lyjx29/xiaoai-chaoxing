@@ -126,6 +126,17 @@
             .replace(/"/g, '&quot;');
     }
 
+    // 简答答案 → UEditor HTML：转义 + 保留换行/分段结构（空行分段，单换行转<br>）
+    function answerToHtml(text) {
+        var s = String(text == null ? '' : text);
+        s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        s = s.replace(/\r\n/g, '\n');
+        var parts = s.split(/\n{2,}/);
+        return parts.map(function (p) {
+            return '<p>' + p.replace(/\n/g, '<br>') + '</p>';
+        }).join('');
+    }
+
     // 剥离 alterTitle 插入的 .xiaoai-ai 标记（避免污染题干 → 影响缓存 key 与下次匹配）
     function stripAiMarker(html) {
         if (!html) return '';
@@ -686,6 +697,58 @@
         });
     }
 
+    /* =========================== 简答题两段式（草稿 → 誊抄） =========================== */
+    // 获取原始 AI 返回（不做任何提取/解析，整段保留）
+    function getRawAnswer(prompt, label) {
+        return ApiClient.ask(prompt, 0).then(function (raw) {
+            _dailyCount++;
+            if (DEV_MODE) debugLog('← [' + (label || 'AI') + '] 原始返回(' + raw.length + '字符): ' + raw.slice(0, 300));
+            return raw;
+        });
+    }
+
+    // 判断整理后的答案是否"干净"（短、无思考痕迹）
+    function isCleanEssayAnswer(text) {
+        if (!text) return false;
+        var s = String(text).trim();
+        if (s.length > 1200) return false;
+        if (/我们(只需要|需要|先|再看|可以)|让我(们)?(算|看|分析)|需要计算|我的思路|首先我/.test(s)) return false;
+        return true;
+    }
+
+    // 兜底提取：从"答案/结论/因此"等关键词后取剩余内容
+    function extractTrailingEssay(text) {
+        if (!text) return null;
+        var m = String(text).match(/(?:最终答案|答案是|答案为|因此|所以|结论)[：:，,]?\s*([\s\S]{5,})$/);
+        if (m && m[1].trim()) return m[1].trim();
+        return null;
+    }
+
+    // 简答/论述/计算/翻译：始终两段式（草稿 → AI 自定格式誊抄 → 标记提取）
+    function answerEssay(type, question, prompt) {
+        return getRawAnswer(prompt, '简答·第一段草稿').then(function (draft) {
+            if (DEV_MODE) debugLog('【简答·第一段草稿】' + draft.slice(0, 150));
+            var rp = Core.PromptBuilder.buildReformat(question, draft);
+            return getRawAnswer(rp, '简答·第二段整理').then(function (raw2) {
+                if (DEV_MODE) debugLog('【简答·第二段整理】' + raw2.slice(0, 150));
+                // 1) 优先提取【答案】标记内的内容（AI 自定边界）
+                var marked = Core.extractAnswerSection(raw2);
+                if (marked) return marked;
+                // 2) 无标记但干净 → 整段
+                if (isCleanEssayAnswer(raw2)) return raw2;
+                // 3) 无标记且混乱 → 关键词兜底
+                var fb = extractTrailingEssay(raw2);
+                if (fb) return fb;
+                // 4) 全失败 → 退回第一段草稿
+                logger('简答整理异常，退回第一段草稿', 'orange');
+                return draft;
+            }).catch(function () {
+                logger('简答第二段整理失败，退回第一段草稿', 'orange');
+                return draft;
+            });
+        });
+    }
+
     /* =========================== UEditor / 编辑器填充助手 =========================== */
     var EditorHelper = {
         // 三层定位 UEditor 实例
@@ -709,10 +772,26 @@
             return ueditor;
         },
 
-        // 设置 UEditor 内容并同步隐藏 textarea
+        // 设置 UEditor 内容并同步隐藏 textarea（填空用：原样）
         setUEditorContent: function (ueditor, textarea, val) {
             try {
                 if (ueditor && ueditor.setContent) { ueditor.setContent(val); }
+            } catch (e) { /* ignore */ }
+            if (textarea) {
+                try {
+                    textarea.val(val);
+                    if (textarea[0]) {
+                        textarea[0].dispatchEvent(new Event('change'));
+                        textarea[0].dispatchEvent(new Event('input'));
+                    }
+                } catch (e) { /* ignore */ }
+            }
+        },
+
+        // 设置 UEditor 内容（简答用：保留换行/分段结构，转 HTML）
+        setEssayContent: function (ueditor, textarea, val) {
+            try {
+                if (ueditor && ueditor.setContent) { ueditor.setContent(answerToHtml(val)); }
             } catch (e) { /* ignore */ }
             if (textarea) {
                 try {
@@ -902,7 +981,11 @@
             }
             case 4: case 5: case 7: case 8: { // 简答/写作/计算/翻译 → 文本
                 adapter.fillEssay($timu, answer);
-                if (alterTitle) adapter.showAnswerInTitle($timu, answer);
+                // 长答案在标题里只显示前 100 字，避免刷屏
+                if (alterTitle) {
+                    var titleAns = String(answer || '');
+                    adapter.showAnswerInTitle($timu, titleAns.length > 100 ? titleAns.slice(0, 100) + '…' : titleAns);
+                }
                 return { success: true, confidence: 'essay' };
             }
             case 6: { // 复合大题（阅读/完形）在子题处理器中单独处理
@@ -989,6 +1072,28 @@
 
                 var thinkingHtml = '<span style="display:inline-block;width:9px;height:9px;margin-right:5px;border:1.5px solid rgba(15,23,42,.18);border-top-color:rgba(15,23,42,.7);border-radius:50%;vertical-align:-1px;animation:ne21-spin .8s linear infinite;"></span>AI 思考中...';
                 var $thinking = logger(thinkingHtml, 'gray');
+
+                // 简答/论述/计算/翻译：走两段式（草稿→誊抄），不影响客观题
+                if ([4, 5, 7, 8].indexOf(typeInfo.type) !== -1) {
+                    answerEssay(typeInfo.type, questionText, prompt).then(function (finalAnswer) {
+                        updateLogEntry($thinking, '答案已生成', 'purple');
+                        var result = applyAnswer(typeInfo.type, finalAnswer, options, $timu, adapter, settings);
+                        if (result.success) {
+                            if (getSettingBool('useCache', !!CONFIG.useCache)) AnswerCache.set(questionText, typeInfo.type, options, finalAnswer);
+                            logger(prefix + '简答作答成功', 'green');
+                            _answeredCount++;
+                            resolve({ success: true, reason: 'answered', confidence: 'essay' });
+                        } else {
+                            logger(prefix + '简答填入失败 — ' + result.reason, 'red');
+                            Report.snapshot('第' + (index + 1) + '题 [' + typeInfo.typeName + '] 简答填入失败', $timu[0] ? $timu[0].outerHTML : '');
+                            resolve({ success: false, reason: result.reason });
+                        }
+                    }).catch(function (err) {
+                        updateLogEntry($thinking, '简答生成失败: ' + (err.msg || err.c || '未知'), 'red');
+                        resolve({ success: false, reason: 'api_error' });
+                    });
+                    return;
+                }
 
                 // AI 确认次数：>1 时对客观题多次询问取多数，消除随机波动
                 var voteTimes = 1 + (parseInt(getSetting('aiVote', 0), 10) || 0);
@@ -1211,7 +1316,7 @@
                 setTimeout(function () {
                     var ueditor = EditorHelper.getUEditor(ctxWin, editorIndex, itemId);
                     var $ta = $tas.first();
-                    EditorHelper.setUEditorContent(ueditor, $ta, answer);
+                    EditorHelper.setEssayContent(ueditor, $ta, answer);
                 }, 500);
             } else if ($tas.length > 0) {
                 $tas.first().val(answer).trigger('input').trigger('change');
@@ -1298,7 +1403,7 @@
             $tas.each(function (i) {
                 var id = $(this).attr('id') || $(this).attr('name');
                 setTimeout(function () {
-                    try { if (id && UE && UE.getEditor(id)) UE.getEditor(id).setContent(answer); } catch (e) {}
+                    try { if (id && UE && UE.getEditor(id)) UE.getEditor(id).setContent(answerToHtml(answer)); } catch (e) {}
                 }, 300 + i * 200);
             });
         },
@@ -1384,7 +1489,7 @@
             $tas.each(function (i) {
                 var id = $(this).attr('id') || $(this).attr('name');
                 setTimeout(function () {
-                    try { if (id && UE && UE.getEditor(id)) UE.getEditor(id).setContent(answer); } catch (e) {}
+                    try { if (id && UE && UE.getEditor(id)) UE.getEditor(id).setContent(answerToHtml(answer)); } catch (e) {}
                 }, 300 + i * 200);
             });
         },
@@ -1469,7 +1574,7 @@
             $tas.each(function (i) {
                 var id = $(this).attr('id') || $(this).attr('name');
                 setTimeout(function () {
-                    try { if (id && UE && UE.getEditor(id)) UE.getEditor(id).setContent(answer); } catch (e) {}
+                    try { if (id && UE && UE.getEditor(id)) UE.getEditor(id).setContent(answerToHtml(answer)); } catch (e) {}
                 }, 300 + i * 200);
             });
         },
@@ -1538,8 +1643,8 @@
             var $blanks = $timu.find('.Zy_ulTk .XztiHover1');
             $blanks.each(function () {
                 try {
-                    $(this).find('#ueditor_' + 0).contents().find('.view p').html(answer);
-                    $(this).find('textarea').html('<p>' + answer + '</p>');
+                    $(this).find('#ueditor_' + 0).contents().find('.view p').html(answerToHtml(answer));
+                    $(this).find('textarea').html('<p>' + answer.replace(/\n/g, '<br>') + '</p>');
                 } catch (e) { /* ignore */ }
             });
         },
