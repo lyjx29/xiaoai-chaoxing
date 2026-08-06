@@ -23,7 +23,7 @@ function test(name, fn) {
 }
 
 // 创建带学习通作业页 DOM 的 jsdom 窗口
-function makeWindow(bodyHtml, pathname) {
+function makeWindow(bodyHtml, pathname, devMode) {
     const dom = new JSDOM('<!DOCTYPE html><html><body>' + (bodyHtml || '') + '</body></html>', {
         url: 'https://mooc1.chaoxing.com' + (pathname || '/'),
         runScripts: 'dangerously',
@@ -47,6 +47,8 @@ function makeWindow(bodyHtml, pathname) {
     win.localStorage.setItem('GPTJsSetting.apiKey', 'sk-test-key');
     win.localStorage.setItem('GPTJsSetting.baseURL', 'https://api.deepseek.com');
     win.localStorage.setItem('GPTJsSetting.model', 'deepseek-v4-flash');
+    // 开发模式：脚本加载前设置
+    if (devMode) win.__XIAOAI_DEV_MODE__ = true;
     // 加载 jQuery
     win.eval(jquerySrc);
     // 运行脚本
@@ -445,6 +447,41 @@ async function main() {
         const lastIdx = clicks[clicks.length - 1];
         const lastLabel = win.document.querySelectorAll('.ans-videoquiz-opt label')[lastIdx];
         if (lastLabel.textContent.indexOf('UDP') === -1) throw new Error('排除法应改选 UDP，实际最后选: ' + lastLabel.textContent + ' (点击序列 ' + JSON.stringify(clicks) + ')');
+    });
+
+    console.log('\n===== 诊断报告 =====\n');
+    await test('诊断报告：API Key 打码 + DOM 探针 + 日志捕获', async function () {
+        const body = '<div class="mark_table"><form>' +
+            '<div class="questionLi" typename="单选题"><h3 class="mark_name">(单选题) 测试题</h3>' +
+            '<div class="stem_answer"><div class="answer_p">选项A</div><div class="answer_p">选项B</div></div></div>' +
+            '</form></div>';
+        const win = makeWindow(body, '/mooc2/work/dowork?courseid=1', true); // DEV_MODE 开启
+        const T = win.__XIAOAI_TEST__;
+        if (!T.Report) throw new Error('Report 未暴露');
+        // 手动设置 API Key，验证报告打码
+        win.localStorage.setItem('GPTJsSetting.apiKey', 'sk-super-secret-123');
+        const report = T.Report.build();
+        if (!report) throw new Error('报告构建失败');
+        // 1. API Key 打码
+        const settingsStr = JSON.stringify(report.settings || {});
+        if (settingsStr.indexOf('sk-super-secret-123') !== -1) throw new Error('API Key 泄漏到报告!');
+        if ((report.settings || {}).apiKey !== '(已打码，不外泄)') throw new Error('apiKey 字段未打码');
+        // 2. DOM 探针
+        const probe = report.domProbe || {};
+        if (probe['.questionLi'] !== 1) throw new Error('DOM 探针未检测到 .questionLi: ' + JSON.stringify(probe));
+        if (probe['.stem_answer .answer_p'] !== 2) throw new Error('DOM 探针未检测到 2 个选项');
+        // 3. meta 信息
+        if (!report.meta || !report.meta.url) throw new Error('meta 缺少 url');
+        if (report.meta.url.indexOf('/mooc2/work/dowork') === -1) throw new Error('meta.url 错误: ' + report.meta.url);
+        // 4. 路由信息
+        if (report.route.indexOf('/mooc2/work/dowork') === -1) throw new Error('route 未记录');
+    });
+
+    await test('非开发模式：Report.export 拒绝导出', async function () {
+        const win = makeWindow('<div></div>', '/xiaoai-test', false); // DEV_MODE 关闭
+        const T = win.__XIAOAI_TEST__;
+        const r = T.Report.export();
+        if (r !== null) throw new Error('非开发模式不应导出报告');
     });
 
     /* ======================= 汇总 ======================= */

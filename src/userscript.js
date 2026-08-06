@@ -148,6 +148,11 @@
      * 更新检测时请置 true，发布前务必改回 false。
      */
     var DEV_MODE = false;
+    // 允许运行时覆盖（测试/高级用法）：在脚本加载前设置 window.__XIAOAI_DEV_MODE__ = true
+    try {
+        if ((typeof unsafeWindow !== 'undefined' && unsafeWindow.__XIAOAI_DEV_MODE__) ||
+            (typeof __XIAOAI_DEV_MODE__ !== 'undefined' && __XIAOAI_DEV_MODE__)) DEV_MODE = true;
+    } catch (e) { /* ignore */ }
 
     var LogColors = {
         red: '#dc2626', green: '#059669', blue: '#2563eb',
@@ -237,6 +242,130 @@
             return text;
         };
         _w.__xiaoaiClearLog = function () { Logger.clear(); return '日志已清空'; };
+    } catch (e) { /* ignore */ }
+
+    /* =========================== 诊断报告（DEV_MODE 专用） =========================== */
+    var Report = {
+        _errors: [],
+        _snapshots: [],
+        _meta: null,
+        _route: '',
+
+        init: function () {
+            if (!DEV_MODE) return;
+            try {
+                this._meta = {
+                    time: new Date().toLocaleString(),
+                    scriptVersion: (typeof GM_info !== 'undefined' && GM_info && GM_info.script) ? GM_info.script.version : 'unknown',
+                    handler: (typeof GM_info !== 'undefined' && GM_info && GM_info.scriptHandler) ? GM_info.scriptHandler : 'unknown',
+                    ua: navigator.userAgent,
+                    url: _l.href,
+                    hostname: _l.hostname,
+                    pathname: _l.pathname,
+                    uid: uid()
+                };
+            } catch (e) { /* ignore */ }
+            // 捕获页面错误与未处理 Promise 拒绝
+            try {
+                _w.addEventListener('error', function (e) {
+                    Report._errors.push('[页面错误] ' + (e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || ''));
+                });
+                _w.addEventListener('unhandledrejection', function (e) {
+                    var r = e && e.reason;
+                    Report._errors.push('[未处理拒绝] ' + (r && (r.msg || r.message || r.stack || r)) + '');
+                });
+            } catch (e) { /* ignore */ }
+        },
+
+        setRoute: function (r) { if (DEV_MODE) this._route = r; },
+
+        // 题目 DOM 快照（解析/匹配失败时调用）
+        snapshot: function (label, html) {
+            if (!DEV_MODE) return;
+            if (this._snapshots.length > 12) this._snapshots.shift();
+            this._snapshots.push({ label: label, html: String(html || '').slice(0, 2000) });
+        },
+
+        // 关键选择器存在性探针：判断真实页面结构是否与适配器预期一致
+        domProbe: function () {
+            var probes = {};
+            var path = _l.pathname;
+            var selectors = [];
+            if (path.indexOf('/mooc2/work/dowork') !== -1) {
+                selectors = ['.mark_table', '.mark_table form', '.questionLi', '.stem_answer .answer_p',
+                    '.stem_answer textarea', 'textarea[name^="answerEditor"]', '.reading_answer', '.CodeMirror', '.subEditor textarea'];
+            } else if (path.indexOf('/work/phone') !== -1) {
+                selectors = ['.Py-mian1', '.Py-m1-title', '.answerList li', '.answerList.singleChoice li',
+                    '.answerList.multiChoice li', '.answerList.panduan li', '.blankList2 input', '[data-editorindex]',
+                    '.zquestions', '.zsubmit', 'textarea[name^="answer"]'];
+            } else if (path.indexOf('/exam/test') !== -1) {
+                selectors = ['.whiteDiv', 'h3.mark_name', '#submitTest', '.stem_answer .answer_p', '.nextDiv', '.answerBg', '.reading_answer'];
+            } else if (path.indexOf('/mooc2/exam/preview') !== -1) {
+                selectors = ['.questionLi', '.mark_name', '.answerBg .answer_p', '.reading_answer', 'textarea[name^="answerEditor"]'];
+            } else if (path.indexOf('/knowledge/cards') !== -1) {
+                selectors = ['.ans-attach-ct', '.ans-attach-ct iframe', '.ans-videoquiz', '#videoquiz-submit', 'video', 'audio', 'style:contains(font-cxsecret)'];
+            }
+            var doc = _d;
+            for (var i = 0; i < selectors.length; i++) {
+                try { probes[selectors[i]] = doc.querySelectorAll(selectors[i]).length; } catch (e) { probes[selectors[i]] = 'err'; }
+            }
+            return probes;
+        },
+
+        // 设置快照（API Key 打码，绝不导出密钥）
+        settings: function () {
+            var s = {};
+            ['baseURL', 'model', 'temperature', 'maxTokens', 'jsonMode', 'requestInterval', 'reqTimeout',
+                'rate', 'accuracy', 'sub', 'force', 'examTurn', 'goodStudent', 'alterTitle', 'redo',
+                'randomDo', 'fuzzyMatch', 'decrypt', 'antiDetect', 'showBox', 'time', 'review'].forEach(function (k) {
+                var v = getSetting(k, CONFIG[k] !== undefined ? CONFIG[k] : '');
+                s[k] = (typeof v === 'string' && v.length > 0 && v.length <= 200) ? v : v;
+            });
+            s.apiKey = '(已打码，不外泄)';
+            return s;
+        },
+
+        build: function () {
+            return {
+                meta: this._meta,
+                route: this._route,
+                settings: this.settings(),
+                domProbe: this.domProbe(),
+                errors: this._errors,
+                questionSnapshots: this._snapshots,
+                log: Logger.exportText()
+            };
+        },
+
+        export: function () {
+            if (!DEV_MODE) { logger('诊断报告仅开发模式可用（DEV_MODE=true）', 'orange'); return null; }
+            try {
+                var obj = this.build();
+                var json = JSON.stringify(obj, null, 2);
+                try {
+                    console.log('===== 小哀学习通诊断报告 (' + Logger._buffer.length + ' 行日志) =====');
+                    console.log(json);
+                } catch (e) { /* ignore */ }
+                var blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+                var url = URL.createObjectURL(blob);
+                var a = _d.createElement('a');
+                a.href = url;
+                a.download = 'xiaoai-report-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.json';
+                _d.body.appendChild(a);
+                a.click();
+                setTimeout(function () { URL.revokeObjectURL(url); try { a.remove(); } catch (e) {} }, 2000);
+                logger('诊断报告已导出（' + Logger._buffer.length + ' 行日志、' + obj.questionSnapshots.length + ' 个题目快照、' + obj.errors.length + ' 条错误）', 'green');
+                return obj;
+            } catch (e) {
+                logError('导出报告失败: ' + (e && e.message));
+                return null;
+            }
+        }
+    };
+
+    // 控制台钩子：__xiaoaiExportReport() 导出完整诊断报告
+    try {
+        _w.__xiaoaiExportReport = function () { return Report.export(); };
     } catch (e) { /* ignore */ }
 
     /* =========================== 设置读写（GM + localStorage 双写） =========================== */
@@ -715,6 +844,7 @@
                 var typeInfo = adapter.getType($timu);
                 if (typeInfo.type === undefined) {
                     logger(prefix + '无法识别题型(' + (typeInfo.typeName || '未知') + ')，跳过', 'red');
+                    Report.snapshot('第' + (index + 1) + '题 [未知题型: ' + (typeInfo.typeName || '?') + '] 解析失败', $timu[0] ? $timu[0].outerHTML : '');
                     return resolve({ success: false, reason: 'unknown_type' });
                 }
                 var questionText = adapter.getQuestionText($timu);
@@ -768,6 +898,7 @@
                         resolve({ success: true, reason: 'answered', confidence: result.confidence });
                     } else {
                         logger(prefix + '答案匹配失败 — ' + result.reason, 'red');
+                        Report.snapshot('第' + (index + 1) + '题 [' + typeInfo.typeName + '] 匹配失败(AI="' + String(answer).slice(0, 60) + '", 原因=' + result.reason + ')', $timu[0] ? $timu[0].outerHTML : '');
                         randomAnswer(typeInfo.type, options, adapter, $timu);
                         resolve({ success: false, reason: result.reason });
                     }
@@ -2032,6 +2163,7 @@
 
         route: function () {
             Logger.init();
+            Report.init();
             UIManager.init();
 
             if (getSettingBool('decrypt', !!CONFIG.decrypt)) {
@@ -2046,6 +2178,7 @@
 
             var host = _l.hostname;
             var path = _l.pathname;
+            Report.setRoute(host + path);
             logStep('路由', host + path + (Logger.isDebug() ? ' (调试模式已开启)' : ''), 'purple');
 
             if (path === '/login' && getSettingBool('autoLogin', !!CONFIG.autoLogin)) {
@@ -2570,12 +2703,14 @@
 
         _renderNotice: function () {
             var u = uid();
+            var devBtn = DEV_MODE ? '<button id="exportReportBtn" class="ne21-btn ne21-btn-secondary" title="导出诊断报告(仅开发模式)">导出报告</button>' : '';
             $('#ne-21notice').html(
-                '<div class="ne21-uid">学习通账号 UID：<b>' + (u || '-') + '</b></div>' +
+                '<div class="ne21-uid">学习通账号 UID：<b>' + (u || '-') + '</b>' + (DEV_MODE ? ' <span style="color:#ea580c;">[DEV]</span>' : '') + '</div>' +
                 '<div class="ne21-row">' +
                 '<button id="pauseBtn" class="ne21-btn ne21-btn-primary">暂停</button>' +
                 '<button id="moreSettingsBtn" class="ne21-btn ne21-btn-secondary">设置</button>' +
                 '<button id="testApiBtn" class="ne21-btn ne21-btn-secondary">测API</button>' +
+                devBtn +
                 '</div>'
             );
             this._updatePauseUI();
@@ -2748,6 +2883,11 @@
                     $('#userInfo').html('API 连接失败: ' + (e.msg || ''));
                 });
             });
+
+            // 导出诊断报告（仅开发模式显示按钮）
+            $box.on('click', '#exportReportBtn', function () {
+                Report.export();
+            });
         },
 
         _initSettings: function () {
@@ -2834,7 +2974,7 @@
                 MediaHandler: MediaHandler, VideoQuizHandler: VideoQuizHandler,
                 AntiDetect: AntiDetect, FontDecryptor: FontDecryptor,
                 getSetting: getSetting, setSetting: setSetting,
-                CONFIG: CONFIG, Storage: Storage, logger: logger
+                CONFIG: CONFIG, Storage: Storage, logger: logger, Report: Report
             };
         }
     } catch (e) { /* ignore */ }
