@@ -6944,26 +6944,30 @@
         },
 
         _getCSS: function () {
-            return '#ne-21box{position:fixed;top:5%;right:16%;width:350px;z-index:99999;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:13px;color:rgba(15,23,42,.86);background:linear-gradient(180deg,rgba(255,255,255,.62),rgba(241,245,249,.55));backdrop-filter:blur(22px) saturate(180%);border:1px solid rgba(255,255,255,.65);border-radius:22px;box-shadow:0 0 0 1px rgba(15,23,42,.09),0 24px 48px -12px rgba(15,23,42,.45);overflow:hidden;transition:opacity .25s,transform .25s;animation:ne21-in .4s cubic-bezier(.2,.9,.3,1) both;}' +
+            // 保持白色低可见度（考试用不易被发现），仅做布局微调区分
+            return '#ne-21box{position:fixed;top:5%;right:16%;width:350px;z-index:99999;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:13px;color:rgba(15,23,42,.86);background:linear-gradient(180deg,rgba(255,255,255,.62),rgba(241,245,249,.55));backdrop-filter:blur(22px) saturate(180%);border:1px solid rgba(255,255,255,.65);border-radius:18px;box-shadow:0 0 0 1px rgba(15,23,42,.09),0 24px 48px -12px rgba(15,23,42,.45);overflow:hidden;transition:opacity .25s,transform .25s;animation:ne21-in .4s cubic-bezier(.2,.9,.3,1) both;}' +
                 '@keyframes ne21-in{from{opacity:0;transform:translateY(-8px) scale(.98)}to{opacity:1;transform:none}}' +
                 '@keyframes ne21-spin{to{transform:rotate(360deg)}}' +
-                '#ne-21box .ne21-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;cursor:move;user-select:none;border-bottom:1px solid rgba(15,23,42,.07);}' +
+                '#ne-21box .ne21-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:move;user-select:none;border-bottom:1px dashed rgba(15,23,42,.12);}' +
                 '#ne-21box.ne21-collapsed .ne21-body{display:none;}' +
                 '#ne-21box .ne21-title{display:flex;align-items:center;gap:9px;font-weight:600;font-size:14px;margin:0;}' +
                 '#ne-21box .ne21-ver{margin-left:6px;font-size:10px;font-weight:500;color:rgba(15,23,42,.45);background:rgba(15,23,42,.06);border:1px solid rgba(15,23,42,.08);border-radius:6px;padding:1px 5px;}' +
                 '#ne-21box .xiaoai-update{margin-top:8px;padding:7px 10px;font-size:12px;color:#b45309;background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.3);border-radius:10px;}' +
                 '#ne-21box .xiaoai-update a{margin-left:6px;color:#d97706;font-weight:600;text-decoration:none;}' +
-                '#ne-21box .ne21-dot{width:9px;height:9px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff,rgba(15,23,42,.3));flex-shrink:0;}' +
-                '#ne-21box #ne-21close{margin:0;width:24px;height:24px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;border:1px solid rgba(255,255,255,.65);border-radius:50%;background:rgba(255,255,255,.55);}' +
-                '#ne-21box .ne21-body{padding:14px 16px 16px;}' +
-                '#ne-21box .ne21-uid{color:rgba(15,23,42,.62);font-size:12px;margin-bottom:10px;padding:8px 12px;background:rgba(255,255,255,.5);border:1px solid rgba(255,255,255,.7);border-radius:12px;}' +
-                '#ne-21box .ne21-row{display:flex;gap:8px;align-items:center;}' +
-                '#ne-21box .ne21-btn{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;font-size:12px;border-radius:14px;cursor:pointer;border:1px solid rgba(255,255,255,.7);white-space:nowrap;}' +
-                '#ne-21box .ne21-btn-primary{background:rgba(255,255,255,.72);box-shadow:0 0 0 1px rgba(15,23,42,.07);}' +
-                '#ne-21box .ne21-btn-secondary{background:rgba(255,255,255,.45);color:rgba(15,23,42,.78);}' +
-                '#ne-21box .ne21-input{width:100%;box-sizing:border-box;margin:4px 0;padding:6px 8px;font-size:12px;border:1px solid rgba(15,23,42,.12);border-radius:8px;background:rgba(255,255,255,.6);}' +
-                '#ne-21box #userInfo{margin:10px 0 0;padding:10px 12px;background:rgba(255,255,255,.5);border:1px solid rgba(255,255,255,.7);border-radius:12px;font-size:12px;color:rgba(15,23,42,.66);}' +
-                '#ne-21box #moreSettings{padding:4px 14px;background:rgba(255,255,255,.42);border:1px solid rgba(255,255,255,.65);border-radius:14px;margin:10px 0 0;max-height:320px;overflow-y:auto;}' +
+                '#ne-21box .ne21-dot{width:8px;height:8px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff,rgba(15,23,42,.35));flex-shrink:0;}' +
+                '#ne-21box #ne-21close{margin:0;width:22px;height:22px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;border:1px solid rgba(15,23,42,.12);border-radius:6px;background:rgba(255,255,255,.55);}' +
+                '#ne-21box #ne-21close:hover{background:rgba(255,255,255,.8);}' +
+                '#ne-21box .ne21-body{padding:12px 14px 14px;}' +
+                '#ne-21box .ne21-uid{color:rgba(15,23,42,.62);font-size:12px;margin-bottom:10px;padding:8px 12px;background:rgba(255,255,255,.5);border:1px solid rgba(255,255,255,.7);border-radius:10px;}' +
+                '#ne-21box .ne21-row{display:flex;gap:6px;align-items:center;}' +
+                '#ne-21box .ne21-btn{display:inline-flex;align-items:center;justify-content:center;padding:6px 12px;font-size:12px;border-radius:8px;cursor:pointer;border:1px solid rgba(15,23,42,.14);white-space:nowrap;background:rgba(255,255,255,.55);}' +
+                '#ne-21box .ne21-btn:hover{background:rgba(255,255,255,.85);}' +
+                '#ne-21box .ne21-btn-primary{background:rgba(255,255,255,.72);box-shadow:0 1px 2px rgba(15,23,42,.08);}' +
+                '#ne-21box .ne21-btn-secondary{background:rgba(255,255,255,.42);color:rgba(15,23,42,.78);}' +
+                '#ne-21box .ne21-input{width:100%;box-sizing:border-box;margin:4px 0;padding:6px 8px;font-size:12px;border:1px solid rgba(15,23,42,.12);border-radius:7px;background:rgba(255,255,255,.6);}' +
+                '#ne-21box #userInfo{margin:10px 0 0;padding:10px 12px;background:rgba(255,255,255,.5);border:1px solid rgba(255,255,255,.7);border-radius:10px;font-size:12px;color:rgba(15,23,42,.66);}' +
+                '#ne-21box #moreSettings{padding:4px 12px;background:rgba(255,255,255,.42);border:1px solid rgba(255,255,255,.65);border-radius:12px;margin:10px 0 0;max-height:320px;overflow-y:auto;}' +
+                '#ne-21box #moreSettings .ne21-sec{margin:10px 0 4px;font-size:11px;font-weight:600;color:rgba(15,23,42,.4);letter-spacing:.5px;}' +
                 '#ne-21box #moreSettings label{display:flex;flex-direction:row-reverse;align-items:center;justify-content:space-between;margin:0;padding:8px 2px;font-size:12px;color:rgba(15,23,42,.78);cursor:pointer;}' +
                 '#ne-21box #moreSettings label+label{border-top:1px dashed rgba(15,23,42,.1);}' +
                 '#ne-21box #moreSettings input[type=checkbox]{width:34px;height:20px;border:1px solid rgba(15,23,42,.08);border-radius:20px;cursor:pointer;position:relative;background:rgba(15,23,42,.16);margin:0 0 0 10px;flex-shrink:0;appearance:none;-webkit-appearance:none;}' +
@@ -6971,9 +6975,10 @@
                 '#ne-21box #moreSettings input[type=checkbox]:checked{background:rgba(255,255,255,.78);}' +
                 '#ne-21box #moreSettings input[type=checkbox]:checked::before{transform:translateX(14px);}' +
                 '#ne-21box #moreSettings p{display:none;}' +
-                '#ne-21box #ne-21log{max-height:140px;overflow-y:auto;margin:12px 0 0;padding:10px 12px;background:rgba(15,23,42,.06);border:1px solid rgba(255,255,255,.55);border-radius:14px;font-family:Consolas,Menlo,monospace;font-size:11px;line-height:1.6;color:rgba(15,23,42,.78);}' +
+                '#ne-21box #ne-21log{max-height:140px;overflow-y:auto;margin:12px 0 0;padding:10px 12px;background:rgba(15,23,42,.06);border:1px solid rgba(255,255,255,.55);border-radius:12px;font-family:Consolas,Menlo,monospace;font-size:11px;line-height:1.6;color:rgba(15,23,42,.78);}' +
                 '#ne-21box #ne-21log:empty{display:none;}' +
-                '#ne-21box #ne-21log p{margin:0;padding:2px 0;word-break:break-all;}';
+                '#ne-21box #ne-21log p{margin:0;padding:2px 0;word-break:break-all;}' +
+                '#ne-21box .ne21-foot{margin-top:10px;padding-top:8px;border-top:1px dashed rgba(15,23,42,.1);font-size:10px;color:rgba(15,23,42,.35);text-align:center;user-select:none;}';
         },
 
         _getHTML: function () {
@@ -6986,7 +6991,7 @@
                 '<div id="ne-21notice"></div>' +
                 '<div id="userInfo"></div>' +
                 '<div id="moreSettings" style="display:none;">' +
-                '<div style="font-weight:600;margin:8px 0 2px;color:#7c3aed;">◆ AI 服务配置（自有 Key）</div>' +
+                '<div class="ne21-sec">AI 服务</div>' +
                 '<input id="GPTJsSetting.baseURL" class="ne21-input" placeholder="Base URL，如 https://api.deepseek.com">' +
                 '<input id="GPTJsSetting.apiKey" class="ne21-input" type="password" placeholder="API Key" autocomplete="new-password">' +
                 '<input id="GPTJsSetting.model" class="ne21-input" placeholder="模型名，如 deepseek-v4-flash">' +
@@ -6997,8 +7002,8 @@
                 '<label><input type="number" id="GPTJsSetting.requestInterval" class="ne21-input" min="0" max="60" step="1" style="width:64px;">AI 请求间隔(秒)</label>' +
                 '<label title="客观题额外询问次数取多数票，消除模型随机性。0=单次(最省)，1=问2次，2=问3次(最准)"><input type="number" id="GPTJsSetting.aiVote" class="ne21-input" min="0" max="3" step="1" style="width:64px;">AI 确认次数</label>' +
                 '<label><input type="number" id="GPTJsSetting.time" class="ne21-input" min="0" max="60" step="0.5" style="width:64px;">答题间隔(秒)</label>' +
-                '<label><input type="number" id="GPTJsSetting.accuracy" class="ne21-input" min="0" max="100" step="5" style="width:64px;">答题覆盖率阈值(%)</label>' +
-                '<p></p>' +
+                '<label><input type="number" id="GPTJsSetting.accuracy" class="ne21-input" min="0" max="100" step="5" style="width:64px;">覆盖率阈值(%)</label>' +
+                '<div class="ne21-sec">答题</div>' +
                 '<label><input type="checkbox" id="GPTJsSetting.jsonMode" checked>JSON 结构化输出</label>' +
                 '<label><input type="checkbox" id="GPTJsSetting.sub">测验自动提交</label>' +
                 '<label><input type="checkbox" id="GPTJsSetting.force">测验强制提交</label>' +
@@ -7009,10 +7014,12 @@
                 '<label><input type="checkbox" id="GPTJsSetting.randomDo">无答案时随机选(B/全选/错)</label>' +
                 '<label><input type="checkbox" id="GPTJsSetting.fuzzyMatch" checked>相似度匹配</label>' +
                 '<label><input type="checkbox" id="GPTJsSetting.useCache" checked>答案缓存(省API)</label>' +
+                '<div class="ne21-sec">系统</div>' +
                 '<label><input type="checkbox" id="GPTJsSetting.decrypt" checked>字体解密</label>' +
                 '<label><input type="checkbox" id="GPTJsSetting.antiDetect" checked>防检测</label>' +
                 '</div>' +
                 '<div id="ne-21log"></div>' +
+                '<div class="ne21-foot">小哀学习通助手 · MIT 开源 · <a href="https://github.com/lyjx29/xiaoai-chaoxing" target="_blank" style="color:rgba(15,23,42,.5);">GitHub</a></div>' +
                 '</div></div>';
         },
 
