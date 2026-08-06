@@ -450,7 +450,7 @@ async function main() {
     });
 
     console.log('\n===== 简答题两段式 =====\n');
-    await test('简答两段式：草稿→誊抄→提取【答案】标记内容填入', async function () {
+    await test('简答两段式：干净草稿→誊抄→提取【答案】标记内容填入', async function () {
         const body = '<div class="mark_table"><form>' +
             '<div class="questionLi" typename="简答题"><h3 class="mark_name">(简答题) 计算寻道时间</h3>' +
             '<div class="stem_answer"><textarea name="answerEditor1"></textarea></div>' +
@@ -458,8 +458,8 @@ async function main() {
         const win = makeWindow(body, '/mooc2/work/dowork?courseid=1');
         let calls = 0;
         const contents = [
-            // 第一段：推理泄出的草稿
-            '我们只需要输出答案正文。需要计算寻道时间。从柱面20开始，请求序列10,22,20,2,40,6,38。先来先服务按到达顺序...（大段思考）',
+            // 第一段：干净的草稿（直接作答，无思考痕迹）
+            '先来先服务的访问次序是10,22,20,2,40,6,38。电梯算法从20向磁道号增大方向移动访问22,38，再反向访问10,6,2。',
             // 第二段：AI 自定格式 + 标记
             '整理如下：\n【答案】\n(1) 先来先服务：10,22,20\n(2) 电梯算法：20,22,38\n【/答案】\n以上就是最终答案'
         ];
@@ -471,14 +471,59 @@ async function main() {
         const T = win.__XIAOAI_TEST__;
         const r = await T.QuizEngine.processOne(0, 1, win.jQuery('.questionLi'), T.HomeworkAdapter, {});
         if (!r.success) throw new Error('processOne 未成功');
-        if (calls !== 2) throw new Error('两段式应调用2次API，实际 ' + calls);
+        if (calls !== 2) throw new Error('干净草稿不应重试，应调用2次API，实际 ' + calls);
         const ta = win.document.querySelector('textarea');
         const val = ta.value;
         // 应填入标记内的内容（干净、分点、带换行），而不是推理草稿
         if (val.indexOf('(1) 先来先服务') === -1) throw new Error('未填入标记内答案: ' + val);
-        if (val.indexOf('我们只需要输出答案正文') !== -1) throw new Error('推理草稿被填进去了!');
+        if (val.indexOf('访问次序是10') !== -1) throw new Error('草稿被填进去了(应填标记内内容)!');
         if (val.indexOf('【答案】') !== -1) throw new Error('标记本身被填入!');
         if (val.indexOf('\n') === -1) throw new Error('分点换行丢失: ' + JSON.stringify(val));
+    });
+
+    await test('简答：第一段思考溢出→自动重试→誊抄成功', async function () {
+        const body = '<div class="mark_table"><form>' +
+            '<div class="questionLi" typename="简答题"><h3 class="mark_name">(简答题) CSCAN</h3>' +
+            '<div class="stem_answer"><textarea name="answerEditor1"></textarea></div>' +
+            '</div></div></form></div>';
+        const win = makeWindow(body, '/mooc2/work/dowork?courseid=1');
+        let calls = 0;
+        const contents = [
+            '我们 need answer in Chinese, need solve CSCAN disk scheduling. Need compute...', // 思考溢出
+            'CSCAN从100向磁道号增大方向移动，先服务110，再回到最小磁道，依次服务20、50、80。', // 重试后的干净草稿
+            '整理：\n【答案】\n访问次序：110 → 20 → 50 → 80\n总时间：寻道+旋转延迟\n【/答案】'
+        ];
+        win.GM_xmlhttpRequest = function (opts) {
+            calls++;
+            const b = { choices: [{ message: { content: contents[Math.min(calls - 1, contents.length - 1)] } }] };
+            setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(b) }); }, 5);
+        };
+        const T = win.__XIAOAI_TEST__;
+        const r = await T.QuizEngine.processOne(0, 1, win.jQuery('.questionLi'), T.HomeworkAdapter, {});
+        if (!r.success) throw new Error('重试后应成功');
+        if (calls !== 3) throw new Error('溢出+重试+誊抄应调用3次，实际 ' + calls);
+        const ta = win.document.querySelector('textarea');
+        if (ta.value.indexOf('访问次序：110') === -1) throw new Error('重试后未填入誊抄答案: ' + ta.value);
+        if (ta.value.indexOf('need answer') !== -1) throw new Error('思考溢出被填入!');
+    });
+
+    await test('简答：多次思考溢出→不填思考，标记需手动作答', async function () {
+        const body = '<div class="mark_table"><form>' +
+            '<div class="questionLi" typename="简答题"><h3 class="mark_name">(简答题) 难题</h3>' +
+            '<div class="stem_answer"><textarea name="answerEditor1"></textarea></div>' +
+            '</div></div></form></div>';
+        const win = makeWindow(body, '/mooc2/work/dowork?courseid=1');
+        let calls = 0;
+        win.GM_xmlhttpRequest = function (opts) {
+            calls++;
+            const b = { choices: [{ message: { content: '我们只需要输出答案正文。需要计算。让我先分析题目...（一直思考）' } }] };
+            setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(b) }); }, 5);
+        };
+        const T = win.__XIAOAI_TEST__;
+        const r = await T.QuizEngine.processOne(0, 1, win.jQuery('.questionLi'), T.HomeworkAdapter, {});
+        if (r.success) throw new Error('全溢出应标记失败');
+        const ta = win.document.querySelector('textarea');
+        if (ta.value.trim() !== '') throw new Error('失败时不应填入思考过程，实际: ' + ta.value);
     });
 
     await test('简答两段式：第二段失败退回第一段草稿', async function () {

@@ -626,7 +626,8 @@
         '1. 语言口语化但表达通顺、语法正确；避免"综上所述""由此可见""从XX角度来看"等AI式套话。',
         '2. 不要提到AI、模型、助手等任何关于作答者身份的信息。',
         '3. 结合题目实际内容作答，不要空话套话；可以有少量口语词（如"其实""比如"），但不要过度随意。',
-        '4. 严格只输出答案正文，不要输出"以下是我的答案"之类的引导语，不要编号说明。'
+        '4. 严格只输出答案正文，不要输出"以下是我的答案"之类的引导语，不要编号说明。',
+        '5. 直接写出作答内容本身，就像在答题纸上作答；不要自言自语、不要描述解题思路、不要出现"我们只需要""让我思考""需要计算"之类的话。'
     ].join('\n');
 
     var OBJECTIVE_SYSTEM = '你是一个精确的自动答题引擎。严格按要求只输出答案，绝不输出任何解释、推理过程或多余文字。';
@@ -706,7 +707,8 @@
                 '2. 标记内的格式由你自己根据题目灵活决定：可以分点、编号、列步骤、写公式、换行。\n' +
                 '3. 计算题建议按 已知条件→公式→代入计算→最终结果 组织；若你认为其他格式更合适也可以。\n' +
                 '4. 保留自然的学生口吻，不要像标准答案一样生硬，也不要出现"草稿""整理""AI"等词。\n' +
-                '5. 标记之外不要输出任何内容。';
+                '5. 标记之外不要输出任何内容。\n' +
+                '6. 不要重新计算、不要检查草稿是否正确、不要补充草稿中没有的新内容。草稿里的内容就是你的素材，原样保留，只调整格式与排版。';
             var user = '【题目】\n' + question + '\n\n【我的草稿】\n' + draft + '\n\n请整理成最终答案。';
             return { system: system, user: user };
         }
@@ -4642,6 +4644,13 @@
         return true;
     }
 
+    // 判断是否"思考溢出"（模型在自言自语/描述思路，没直接作答）——只看开头，避免误伤正常答案
+    function isReasoningSpill(text) {
+        if (!text) return true;
+        var head = String(text).trim().slice(0, 90);
+        return /我们只需要|我们 need|need (to )?(solve|answer|compute|calculate|respond|parse|understand)|需要(计算|理解|判断|确定|先|重新)|让我们|我的思路|首先我|让我(们)?(算|看|分析)/i.test(head);
+    }
+
     // 兜底提取：从"答案/结论/因此"等关键词后取剩余内容
     function extractTrailingEssay(text) {
         if (!text) return null;
@@ -4650,28 +4659,43 @@
         return null;
     }
 
+    // 第二段"誊抄"：提取标记 / 干净整段 / 关键词兜底 / 否则视为失败
+    function doReformat(question, draft) {
+        var rp = Core.PromptBuilder.buildReformat(question, draft);
+        return getRawAnswer(rp, '简答·第二段整理').then(function (raw2) {
+            if (DEV_MODE) debugLog('【简答·第二段整理】' + raw2.slice(0, 150));
+            var marked = Core.extractAnswerSection(raw2);
+            if (marked) return { answer: marked, source: 'marked' };
+            if (isCleanEssayAnswer(raw2)) return { answer: raw2, source: 'clean' };
+            var fb = extractTrailingEssay(raw2);
+            if (fb) return { answer: fb, source: 'keyword' };
+            // 第二段也是思考溢出：草稿干净则退回草稿，否则标记失败（不填思考）
+            if (isReasoningSpill(draft)) return { answer: '', source: 'failed', failed: true };
+            logger('简答整理异常，退回第一段草稿', 'orange');
+            return { answer: draft, source: 'draft' };
+        }).catch(function () {
+            logger('简答第二段整理失败，退回第一段草稿', 'orange');
+            if (isReasoningSpill(draft)) return { answer: '', source: 'failed', failed: true };
+            return { answer: draft, source: 'draft' };
+        });
+    }
+
     // 简答/论述/计算/翻译：始终两段式（草稿 → AI 自定格式誊抄 → 标记提取）
+    // 返回 { answer, source, failed }
     function answerEssay(type, question, prompt) {
         return getRawAnswer(prompt, '简答·第一段草稿').then(function (draft) {
             if (DEV_MODE) debugLog('【简答·第一段草稿】' + draft.slice(0, 150));
-            var rp = Core.PromptBuilder.buildReformat(question, draft);
-            return getRawAnswer(rp, '简答·第二段整理').then(function (raw2) {
-                if (DEV_MODE) debugLog('【简答·第二段整理】' + raw2.slice(0, 150));
-                // 1) 优先提取【答案】标记内的内容（AI 自定边界）
-                var marked = Core.extractAnswerSection(raw2);
-                if (marked) return marked;
-                // 2) 无标记但干净 → 整段
-                if (isCleanEssayAnswer(raw2)) return raw2;
-                // 3) 无标记且混乱 → 关键词兜底
-                var fb = extractTrailingEssay(raw2);
-                if (fb) return fb;
-                // 4) 全失败 → 退回第一段草稿
-                logger('简答整理异常，退回第一段草稿', 'orange');
-                return draft;
-            }).catch(function () {
-                logger('简答第二段整理失败，退回第一段草稿', 'orange');
-                return draft;
-            });
+            // 第一段就思考溢出 → 重试一次（溢出有随机性，重试常能拿到干净草稿）
+            if (isReasoningSpill(draft)) {
+                logger('简答第一段出现思考溢出，重试一次', 'orange');
+                return getRawAnswer(prompt, '简答·第一段重试').then(function (draft2) {
+                    if (DEV_MODE) debugLog('【简答·第一段重试】' + draft2.slice(0, 150));
+                    return doReformat(question, draft2);
+                }).catch(function () {
+                    return { answer: '', source: 'failed', failed: true };
+                });
+            }
+            return doReformat(question, draft);
         });
     }
 
@@ -5001,12 +5025,18 @@
 
                 // 简答/论述/计算/翻译：走两段式（草稿→誊抄），不影响客观题
                 if ([4, 5, 7, 8].indexOf(typeInfo.type) !== -1) {
-                    answerEssay(typeInfo.type, questionText, prompt).then(function (finalAnswer) {
+                    answerEssay(typeInfo.type, questionText, prompt).then(function (final) {
+                        // 全失败（多次思考溢出）：不填思考，标记供用户手动作答
+                        if (final.failed || !final.answer) {
+                            updateLogEntry($thinking, 'AI 多次思考溢出未能生成有效答案，请手动作答', 'red');
+                            logger(prefix + 'AI 未能生成有效答案，请手动作答', 'red');
+                            return resolve({ success: false, reason: 'essay_failed' });
+                        }
                         updateLogEntry($thinking, '答案已生成', 'purple');
-                        var result = applyAnswer(typeInfo.type, finalAnswer, options, $timu, adapter, settings);
+                        var result = applyAnswer(typeInfo.type, final.answer, options, $timu, adapter, settings);
                         if (result.success) {
-                            if (getSettingBool('useCache', !!CONFIG.useCache)) AnswerCache.set(questionText, typeInfo.type, options, finalAnswer);
-                            logger(prefix + '简答作答成功', 'green');
+                            if (getSettingBool('useCache', !!CONFIG.useCache)) AnswerCache.set(questionText, typeInfo.type, options, final.answer);
+                            logger(prefix + '简答作答成功 [' + final.source + ']', 'green');
                             _answeredCount++;
                             resolve({ success: true, reason: 'answered', confidence: 'essay' });
                         } else {

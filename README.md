@@ -82,7 +82,7 @@
 
 ## 🧪 测试
 
-项目自带 **65 项纯逻辑单测 + 24 项 jsdom 模拟 DOM 端到端测试**：
+项目自带 **65 项纯逻辑单测 + 26 项 jsdom 模拟 DOM 端到端测试**：
 
 ```bash
 npm install        # 安装 jsdom / jquery
@@ -104,7 +104,7 @@ npm test           # 构建 + 全部测试
 ├── dist/小哀学习通助手.user.js   # 成品（导入即可用）
 ├── test/
 │   ├── core.test.js       # 纯逻辑单测（65 项）
-│   └── dom.test.js        # jsdom 端到端测试（24 项）
+│   └── dom.test.js        # jsdom 端到端测试（26 项）
 ├── docs/
 │   └── 安装教程-小白超详细版.md   # 新手安装教程（README 点击进入）
 └── README.md

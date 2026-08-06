@@ -716,6 +716,13 @@
         return true;
     }
 
+    // 判断是否"思考溢出"（模型在自言自语/描述思路，没直接作答）——只看开头，避免误伤正常答案
+    function isReasoningSpill(text) {
+        if (!text) return true;
+        var head = String(text).trim().slice(0, 90);
+        return /我们只需要|我们 need|need (to )?(solve|answer|compute|calculate|respond|parse|understand)|需要(计算|理解|判断|确定|先|重新)|让我们|我的思路|首先我|让我(们)?(算|看|分析)/i.test(head);
+    }
+
     // 兜底提取：从"答案/结论/因此"等关键词后取剩余内容
     function extractTrailingEssay(text) {
         if (!text) return null;
@@ -724,28 +731,43 @@
         return null;
     }
 
+    // 第二段"誊抄"：提取标记 / 干净整段 / 关键词兜底 / 否则视为失败
+    function doReformat(question, draft) {
+        var rp = Core.PromptBuilder.buildReformat(question, draft);
+        return getRawAnswer(rp, '简答·第二段整理').then(function (raw2) {
+            if (DEV_MODE) debugLog('【简答·第二段整理】' + raw2.slice(0, 150));
+            var marked = Core.extractAnswerSection(raw2);
+            if (marked) return { answer: marked, source: 'marked' };
+            if (isCleanEssayAnswer(raw2)) return { answer: raw2, source: 'clean' };
+            var fb = extractTrailingEssay(raw2);
+            if (fb) return { answer: fb, source: 'keyword' };
+            // 第二段也是思考溢出：草稿干净则退回草稿，否则标记失败（不填思考）
+            if (isReasoningSpill(draft)) return { answer: '', source: 'failed', failed: true };
+            logger('简答整理异常，退回第一段草稿', 'orange');
+            return { answer: draft, source: 'draft' };
+        }).catch(function () {
+            logger('简答第二段整理失败，退回第一段草稿', 'orange');
+            if (isReasoningSpill(draft)) return { answer: '', source: 'failed', failed: true };
+            return { answer: draft, source: 'draft' };
+        });
+    }
+
     // 简答/论述/计算/翻译：始终两段式（草稿 → AI 自定格式誊抄 → 标记提取）
+    // 返回 { answer, source, failed }
     function answerEssay(type, question, prompt) {
         return getRawAnswer(prompt, '简答·第一段草稿').then(function (draft) {
             if (DEV_MODE) debugLog('【简答·第一段草稿】' + draft.slice(0, 150));
-            var rp = Core.PromptBuilder.buildReformat(question, draft);
-            return getRawAnswer(rp, '简答·第二段整理').then(function (raw2) {
-                if (DEV_MODE) debugLog('【简答·第二段整理】' + raw2.slice(0, 150));
-                // 1) 优先提取【答案】标记内的内容（AI 自定边界）
-                var marked = Core.extractAnswerSection(raw2);
-                if (marked) return marked;
-                // 2) 无标记但干净 → 整段
-                if (isCleanEssayAnswer(raw2)) return raw2;
-                // 3) 无标记且混乱 → 关键词兜底
-                var fb = extractTrailingEssay(raw2);
-                if (fb) return fb;
-                // 4) 全失败 → 退回第一段草稿
-                logger('简答整理异常，退回第一段草稿', 'orange');
-                return draft;
-            }).catch(function () {
-                logger('简答第二段整理失败，退回第一段草稿', 'orange');
-                return draft;
-            });
+            // 第一段就思考溢出 → 重试一次（溢出有随机性，重试常能拿到干净草稿）
+            if (isReasoningSpill(draft)) {
+                logger('简答第一段出现思考溢出，重试一次', 'orange');
+                return getRawAnswer(prompt, '简答·第一段重试').then(function (draft2) {
+                    if (DEV_MODE) debugLog('【简答·第一段重试】' + draft2.slice(0, 150));
+                    return doReformat(question, draft2);
+                }).catch(function () {
+                    return { answer: '', source: 'failed', failed: true };
+                });
+            }
+            return doReformat(question, draft);
         });
     }
 
@@ -1075,12 +1097,18 @@
 
                 // 简答/论述/计算/翻译：走两段式（草稿→誊抄），不影响客观题
                 if ([4, 5, 7, 8].indexOf(typeInfo.type) !== -1) {
-                    answerEssay(typeInfo.type, questionText, prompt).then(function (finalAnswer) {
+                    answerEssay(typeInfo.type, questionText, prompt).then(function (final) {
+                        // 全失败（多次思考溢出）：不填思考，标记供用户手动作答
+                        if (final.failed || !final.answer) {
+                            updateLogEntry($thinking, 'AI 多次思考溢出未能生成有效答案，请手动作答', 'red');
+                            logger(prefix + 'AI 未能生成有效答案，请手动作答', 'red');
+                            return resolve({ success: false, reason: 'essay_failed' });
+                        }
                         updateLogEntry($thinking, '答案已生成', 'purple');
-                        var result = applyAnswer(typeInfo.type, finalAnswer, options, $timu, adapter, settings);
+                        var result = applyAnswer(typeInfo.type, final.answer, options, $timu, adapter, settings);
                         if (result.success) {
-                            if (getSettingBool('useCache', !!CONFIG.useCache)) AnswerCache.set(questionText, typeInfo.type, options, finalAnswer);
-                            logger(prefix + '简答作答成功', 'green');
+                            if (getSettingBool('useCache', !!CONFIG.useCache)) AnswerCache.set(questionText, typeInfo.type, options, final.answer);
+                            logger(prefix + '简答作答成功 [' + final.source + ']', 'green');
                             _answeredCount++;
                             resolve({ success: true, reason: 'answered', confidence: 'essay' });
                         } else {
