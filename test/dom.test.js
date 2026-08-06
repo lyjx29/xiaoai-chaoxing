@@ -449,7 +449,59 @@ async function main() {
         if (lastLabel.textContent.indexOf('UDP') === -1) throw new Error('排除法应改选 UDP，实际最后选: ' + lastLabel.textContent + ' (点击序列 ' + JSON.stringify(clicks) + ')');
     });
 
+    console.log('\n===== AI 确认投票 =====\n');
+    await test('AI 确认投票：问2次取多数，选正确选项', async function () {
+        const body = '<div class="mark_table"><form>' +
+            '<div class="questionLi" typename="单选题"><h3 class="mark_name">(单选题) 传输层协议？</h3>' +
+            '<div class="stem_answer">' +
+            '<div class="wrap" style="cursor:pointer;"><span></span><div class="answer_p">TCP协议</div></div>' +
+            '<div class="wrap" style="cursor:pointer;"><span></span><div class="answer_p">UDP协议</div></div>' +
+            '</div></div></form></div>';
+        const win = makeWindow(body, '/mooc2/work/dowork?courseid=1');
+        win.localStorage.setItem('GPTJsSetting.aiVote', '1'); // 问 2 次
+        let calls = 0;
+        const answers = ['{"answer":"UDP协议","answers":["UDP协议"]}', '{"answer":"UDP协议","answers":["UDP协议"]}'];
+        win.GM_xmlhttpRequest = function (opts) {
+            calls++;
+            const content = answers[Math.min(calls - 1, answers.length - 1)];
+            const b = { choices: [{ message: { content: content } }] };
+            setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(b) }); }, 5);
+        };
+        win.document.querySelectorAll('.wrap').forEach(function (el, i) {
+            el.addEventListener('click', function () { el.setAttribute('data-clicked', String(i)); });
+        });
+        const T = win.__XIAOAI_TEST__;
+        const r = await T.QuizEngine.processOne(0, 1, win.jQuery('.questionLi'), T.HomeworkAdapter, {});
+        if (!r.success) throw new Error('processOne 未成功');
+        if (calls < 2) throw new Error('确认模式应询问2次，实际 ' + calls + ' 次');
+        const clicked = win.document.querySelector('.wrap[data-clicked]');
+        if (!clicked || clicked.textContent.indexOf('UDP') === -1) throw new Error('投票未选中 UDP');
+    });
+
+    await test('aiVote=0 时只询问1次（不额外花钱）', async function () {
+        const body = '<div class="mark_table"><form>' +
+            '<div class="questionLi" typename="单选题"><h3 class="mark_name">(单选题) 测试</h3>' +
+            '<div class="stem_answer"><div class="wrap" style="cursor:pointer;"><span></span><div class="answer_p">选项A</div></div></div>' +
+            '</div></div></form></div>';
+        const win = makeWindow(body, '/mooc2/work/dowork?courseid=1');
+        let calls = 0;
+        win.GM_xmlhttpRequest = function (opts) {
+            calls++;
+            const b = { choices: [{ message: { content: '{"answer":"选项A","answers":["选项A"]}' } }] };
+            setTimeout(function () { opts.onload({ status: 200, responseText: JSON.stringify(b) }); }, 5);
+        };
+        const T = win.__XIAOAI_TEST__;
+        await T.QuizEngine.processOne(0, 1, win.jQuery('.questionLi'), T.HomeworkAdapter, {});
+        if (calls !== 1) throw new Error('aiVote=0 应只问1次，实际 ' + calls + ' 次');
+    });
+
     console.log('\n===== 诊断报告 =====\n');
+    await test('报告 log 为逐行数组', async function () {
+        const win = makeWindow('<div class="mark_table"><form><div class="questionLi"></div></form></div>', '/mooc2/work/dowork?courseid=1', true);
+        const T = win.__XIAOAI_TEST__;
+        const report = T.Report.build();
+        if (!Array.isArray(report.log)) throw new Error('log 应为数组，实际 ' + typeof report.log);
+    });
     await test('诊断报告：API Key 打码 + DOM 探针 + 日志捕获', async function () {
         const body = '<div class="mark_table"><form>' +
             '<div class="questionLi" typename="单选题"><h3 class="mark_name">(单选题) 测试题</h3>' +

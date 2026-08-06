@@ -45,6 +45,7 @@
         // ---- 测验 ----
         work: 1, time: 2500, sub: 0, force: 0, decrypt: 1, redo: 0, fuzzyMatch: 1,
         useCache: 1,                            // 本地答案缓存（测试时可关闭，只存高置信度）
+        aiVote: 0,                              // AI 确认次数(额外询问次数)：0=单次, 1=问2次取多数... 提高客观题正确率
         accuracy: 60,                           // 答题覆盖率阈值，达标才自动提交(%)
         randomDo: 0,                            // 无答案时随机选(B/全选/错) 模拟真人
 
@@ -343,8 +344,58 @@
                 domProbe: this.domProbe(),
                 errors: this._errors,
                 questionSnapshots: this._snapshots,
-                log: Logger.exportText()
+                // log 用数组逐行存放，编辑器打开即可按行阅读
+                log: Logger._buffer.map(function (l) { return l.msg; })
             };
+        },
+
+        // 可读文本版报告（记事本可直接看）
+        exportTxt: function () {
+            if (!DEV_MODE) { logger('诊断报告仅开发模式可用（DEV_MODE=true）', 'orange'); return null; }
+            try {
+                var obj = this.build();
+                var parts = [];
+                parts.push('=== 小哀学习通诊断报告 ===');
+                parts.push('时间: ' + (obj.meta ? obj.meta.time : '') + ' | 脚本: v' + (obj.meta ? obj.meta.scriptVersion : '') + ' | 管理器: ' + (obj.meta ? obj.meta.handler : ''));
+                parts.push('URL: ' + (obj.meta ? obj.meta.url : ''));
+                parts.push('UID: ' + (obj.meta ? obj.meta.uid : ''));
+                parts.push('');
+                parts.push('--- 设置 ---');
+                parts.push(JSON.stringify(obj.settings, null, 2));
+                parts.push('');
+                parts.push('--- DOM 探针 ---');
+                parts.push(JSON.stringify(obj.domProbe, null, 2));
+                parts.push('');
+                if (obj.errors && obj.errors.length) {
+                    parts.push('--- 页面错误 (' + obj.errors.length + ') ---');
+                    parts = parts.concat(obj.errors);
+                    parts.push('');
+                }
+                if (obj.questionSnapshots && obj.questionSnapshots.length) {
+                    parts.push('--- 题目快照 (' + obj.questionSnapshots.length + ') ---');
+                    obj.questionSnapshots.forEach(function (s) { parts.push('【' + s.label + '】'); parts.push(s.html); parts.push(''); });
+                }
+                parts.push('--- 运行日志 (' + (obj.log ? obj.log.length : 0) + ' 行) ---');
+                parts = parts.concat(obj.log);
+                var text = parts.join('\n');
+                this._download(text, 'xiaoai-report-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.txt', 'text/plain');
+                logger('可读报告已导出(.txt，' + (obj.log ? obj.log.length : 0) + ' 行日志)，用记事本打开即可逐行阅读', 'green');
+                return text;
+            } catch (e) {
+                logError('导出文本报告失败: ' + (e && e.message));
+                return null;
+            }
+        },
+
+        _download: function (content, name, type) {
+            var blob = new Blob([content], { type: (type || 'application/octet-stream') + ';charset=utf-8' });
+            var url = URL.createObjectURL(blob);
+            var a = _d.createElement('a');
+            a.href = url;
+            a.download = name;
+            _d.body.appendChild(a);
+            a.click();
+            setTimeout(function () { URL.revokeObjectURL(url); try { a.remove(); } catch (e) {} }, 2000);
         },
 
         export: function () {
@@ -353,18 +404,11 @@
                 var obj = this.build();
                 var json = JSON.stringify(obj, null, 2);
                 try {
-                    console.log('===== 小哀学习通诊断报告 (' + Logger._buffer.length + ' 行日志) =====');
+                    console.log('===== 小哀学习通诊断报告 (' + (obj.log ? obj.log.length : 0) + ' 行日志) =====');
                     console.log(json);
                 } catch (e) { /* ignore */ }
-                var blob = new Blob([json], { type: 'application/json;charset=utf-8' });
-                var url = URL.createObjectURL(blob);
-                var a = _d.createElement('a');
-                a.href = url;
-                a.download = 'xiaoai-report-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.json';
-                _d.body.appendChild(a);
-                a.click();
-                setTimeout(function () { URL.revokeObjectURL(url); try { a.remove(); } catch (e) {} }, 2000);
-                logger('诊断报告已导出（' + Logger._buffer.length + ' 行日志、' + obj.questionSnapshots.length + ' 个题目快照、' + obj.errors.length + ' 条错误）', 'green');
+                this._download(json, 'xiaoai-report-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.json', 'application/json');
+                logger('报告已导出(.json，' + (obj.log ? obj.log.length : 0) + ' 行日志已包含其中，直接用编辑器打开即可；也可用 __xiaoaiExportReportTxt() 导出可读的 .txt)', 'green');
                 return obj;
             } catch (e) {
                 logError('导出报告失败: ' + (e && e.message));
@@ -373,9 +417,10 @@
         }
     };
 
-    // 控制台钩子：__xiaoaiExportReport() 导出完整诊断报告
+    // 控制台钩子：__xiaoaiExportReport() 导出 JSON 报告；__xiaoaiExportReportTxt() 导出可读 .txt
     try {
         _w.__xiaoaiExportReport = function () { return Report.export(); };
+        _w.__xiaoaiExportReportTxt = function () { return Report.exportTxt(); };
     } catch (e) { /* ignore */ }
 
     /* =========================== 设置读写（GM + localStorage 双写） =========================== */
@@ -512,10 +557,12 @@
                         });
                     } else {
                         headers['Authorization'] = 'Bearer ' + cfg.apiKey;
+                        // 允许按题型覆盖温度（客观题传 0 以降低随机性）
+                        var temp = promptObj.temperature !== undefined ? promptObj.temperature : cfg.temperature;
                         body = JSON.stringify({
                             model: cfg.model,
                             messages: buildMessages(promptObj),
-                            temperature: cfg.temperature,
+                            temperature: temp,
                             max_tokens: cfg.maxTokens
                         });
                     }
@@ -597,6 +644,8 @@
 
         function buildPromptObj(useJson) {
             var p = { system: promptObj.system, user: promptObj.user };
+            // 客观题温度归零降低随机性，主观题保持用户设置
+            p.temperature = [0, 1, 2, 3].indexOf(type) !== -1 ? 0 : parseFloat(getSetting('temperature', CONFIG.temperature));
             if (useJson && [0, 1, 2, 3].indexOf(type) !== -1) {
                 p.system += '\n必须只输出一个 JSON 对象：{"answer":"...","answers":["..."]}，其中 answer 为答案文本(多选用 | 分隔)，answers 为数组。不要输出任何其他内容。';
             }
@@ -770,6 +819,27 @@
         }
     };
 
+    // 纯匹配（不点击）：返回命中的选项下标数组
+    function matchToIndices(type, answer, options) {
+        if (!answer) return [];
+        switch (type) {
+            case 0: {
+                var r = Core.matchSingle(answer, options, getSettingBool('fuzzyMatch', true) ? 0.45 : -1);
+                return r.index === -1 ? [] : [r.index];
+            }
+            case 1:
+                return Core.matchMulti(answer, options, getSettingBool('fuzzyMatch', true) ? 0.45 : -1);
+            case 3: {
+                var jr = Core.matchJudge(answer);
+                if (jr.isTrue === null) return [];
+                var oi = Core.findJudgeOptionIndex(options, jr.isTrue);
+                return oi === -1 ? [] : [oi];
+            }
+            default:
+                return [];
+        }
+    }
+
     // 是否属于可缓存的高置信度匹配（模糊匹配比例 <60% 不缓存，避免回放错误答案）
     function isCacheableConfidence(conf) {
         if (!conf) return false;
@@ -920,30 +990,89 @@
                 var thinkingHtml = '<span style="display:inline-block;width:9px;height:9px;margin-right:5px;border:1.5px solid rgba(15,23,42,.18);border-top-color:rgba(15,23,42,.7);border-radius:50%;vertical-align:-1px;animation:ne21-spin .8s linear infinite;"></span>AI 思考中...';
                 var $thinking = logger(thinkingHtml, 'gray');
 
-                getAnswer(typeInfo.type, prompt).then(function (answer) {
-                    updateLogEntry($thinking, '答案: ' + answer, 'purple');
+                // AI 确认次数：>1 时对客观题多次询问取多数，消除随机波动
+                var voteTimes = 1 + (parseInt(getSetting('aiVote', 0), 10) || 0);
+                var votable = voteTimes > 1 && [0, 1, 3].indexOf(typeInfo.type) !== -1;
 
-                    var result = applyAnswer(typeInfo.type, answer, options, $timu, adapter, settings);
-                    if (result.success) {
-                        // 匹配成功才写缓存，且仅高置信度（防止模糊匹配的错误答案被回放）
-                        if (getSettingBool('useCache', !!CONFIG.useCache) && isCacheableConfidence(result.confidence)) {
-                            AnswerCache.set(questionText, typeInfo.type, options, answer);
-                        }
-                        logger(prefix + '自动答题成功 [' + result.confidence + ']', 'green');
-                        _answeredCount++;
-                        resolve({ success: true, reason: 'answered', confidence: result.confidence });
-                    } else {
-                        logger(prefix + '答案匹配失败 — ' + result.reason, 'red');
-                        Report.snapshot('第' + (index + 1) + '题 [' + typeInfo.typeName + '] 匹配失败(AI="' + String(answer).slice(0, 60) + '", 原因=' + result.reason + ')', $timu[0] ? $timu[0].outerHTML : '');
-                        randomAnswer(typeInfo.type, options, adapter, $timu);
-                        resolve({ success: false, reason: result.reason });
+                function askOnce() {
+                    return getAnswer(typeInfo.type, prompt).then(function (answer) {
+                        updateLogEntry($thinking, '答案: ' + answer, 'purple');
+                        return { answer: answer, indices: matchToIndices(typeInfo.type, answer, options) };
+                    });
+                }
+
+                function applyVoteIndex(idx, voteAnswer, voteCount) {
+                    var alterTitle = settings.alterTitle !== undefined ? settings.alterTitle : getSettingBool('alterTitle', !!CONFIG.alterTitle);
+                    var goodStudent = getSettingBool('goodStudent', !!CONFIG.goodStudent);
+                    if (alterTitle && voteAnswer) adapter.showAnswerInTitle($timu, voteAnswer);
+                    if (goodStudent) adapter.highlightOption($timu, idx);
+                    else adapter.selectOption($timu, idx);
+                    // 至少 2 票一致才算高置信，可写缓存
+                    if (voteAnswer && voteCount >= 2 && getSettingBool('useCache', !!CONFIG.useCache)) {
+                        AnswerCache.set(questionText, typeInfo.type, options, voteAnswer);
                     }
-                }).catch(function (err) {
-                    updateLogEntry($thinking, 'AI 请求失败: ' + (err.msg || err.c || '未知'), 'red');
-                    logger(prefix + 'AI 请求失败', 'red');
-                    randomAnswer(typeInfo.type, options, adapter, $timu);
-                    resolve({ success: false, reason: 'api_error' });
-                });
+                    logger(prefix + '投票作答成功 [选项' + idx + ']', 'green');
+                    _answeredCount++;
+                    resolve({ success: true, reason: 'answered', confidence: 'vote' });
+                }
+
+                if (!votable) {
+                    // —— 单次询问（原逻辑） ——
+                    askOnce().then(function (vo) {
+                        var result = applyAnswer(typeInfo.type, vo.answer, options, $timu, adapter, settings);
+                        if (result.success) {
+                            if (getSettingBool('useCache', !!CONFIG.useCache) && isCacheableConfidence(result.confidence)) {
+                                AnswerCache.set(questionText, typeInfo.type, options, vo.answer);
+                            }
+                            logger(prefix + '自动答题成功 [' + result.confidence + ']', 'green');
+                            _answeredCount++;
+                            resolve({ success: true, reason: 'answered', confidence: result.confidence });
+                        } else {
+                            logger(prefix + '答案匹配失败 — ' + result.reason, 'red');
+                            Report.snapshot('第' + (index + 1) + '题 [' + typeInfo.typeName + '] 匹配失败(AI="' + String(vo.answer).slice(0, 60) + '", 原因=' + result.reason + ')', $timu[0] ? $timu[0].outerHTML : '');
+                            randomAnswer(typeInfo.type, options, adapter, $timu);
+                            resolve({ success: false, reason: result.reason });
+                        }
+                    }).catch(function (err) {
+                        updateLogEntry($thinking, 'AI 请求失败: ' + (err.msg || err.c || '未知'), 'red');
+                        logger(prefix + 'AI 请求失败', 'red');
+                        randomAnswer(typeInfo.type, options, adapter, $timu);
+                        resolve({ success: false, reason: 'api_error' });
+                    });
+                } else {
+                    // —— AI 确认模式：多次询问取多数 ——
+                    logger(prefix + 'AI 确认模式：询问 ' + voteTimes + ' 次取多数', 'purple');
+                    var votes = [];
+                    (function nextVote(v) {
+                        if (v >= voteTimes) {
+                            var countMap = {};
+                            votes.forEach(function (vo) {
+                                vo.indices.forEach(function (i) { countMap[i] = (countMap[i] || 0) + 1; });
+                            });
+                            var bestIdx = -1, bestCount = 0;
+                            for (var k in countMap) {
+                                if (countMap[k] > bestCount) { bestCount = countMap[k]; bestIdx = +k; }
+                            }
+                            if (bestIdx === -1) {
+                                logger(prefix + '投票无一致匹配，视为失败', 'red');
+                                randomAnswer(typeInfo.type, options, adapter, $timu);
+                                return resolve({ success: false, reason: 'vote_no_match' });
+                            }
+                            var voteAnswer = '';
+                            votes.forEach(function (vo) { if (vo.indices.indexOf(bestIdx) !== -1 && !voteAnswer) voteAnswer = vo.answer; });
+                            if (DEV_MODE) debugLog('投票结果: 选项[' + bestIdx + '] ' + options[bestIdx] + ' 得票 ' + bestCount + '/' + voteTimes);
+                            return applyVoteIndex(bestIdx, voteAnswer, bestCount);
+                        }
+                        askOnce().then(function (vo) {
+                            votes.push(vo);
+                            if (DEV_MODE) debugLog('投票 ' + (v + 1) + '/' + voteTimes + ' -> 选项[' + vo.indices.join(',') + ']');
+                            nextVote(v + 1);
+                        }).catch(function () {
+                            votes.push({ answer: '', indices: [] });
+                            nextVote(v + 1);
+                        });
+                    })(0);
+                }
             });
         },
 
@@ -2813,6 +2942,7 @@
                 '<option value="4">4×</option><option value="8">8×</option><option value="16">16×</option>' +
                 '</select>视频/音频倍速</label>' +
                 '<label><input type="number" id="GPTJsSetting.requestInterval" class="ne21-input" min="0" max="60" step="1" style="width:64px;">AI 请求间隔(秒)</label>' +
+                '<label title="客观题额外询问次数取多数票，消除模型随机性。0=单次(最省)，1=问2次，2=问3次(最准)"><input type="number" id="GPTJsSetting.aiVote" class="ne21-input" min="0" max="3" step="1" style="width:64px;">AI 确认次数</label>' +
                 '<label><input type="number" id="GPTJsSetting.time" class="ne21-input" min="0" max="60" step="0.5" style="width:64px;">答题间隔(秒)</label>' +
                 '<label><input type="number" id="GPTJsSetting.accuracy" class="ne21-input" min="0" max="100" step="5" style="width:64px;">答题覆盖率阈值(%)</label>' +
                 '<p></p>' +
@@ -2958,6 +3088,18 @@
                     if (!isFinite(v) || v < 0) v = 0; if (v > 60) v = 60;
                     reqInput.value = String(v);
                     setSetting('requestInterval', String(v));
+                });
+            }
+
+            // AI 确认次数
+            var voteInput = document.getElementById('GPTJsSetting.aiVote');
+            if (voteInput) {
+                voteInput.value = getSetting('aiVote', '0');
+                voteInput.addEventListener('change', function () {
+                    var v = parseInt(voteInput.value, 10);
+                    if (!isFinite(v) || v < 0) v = 0; if (v > 3) v = 3;
+                    voteInput.value = String(v);
+                    setSetting('aiVote', String(v));
                 });
             }
 
