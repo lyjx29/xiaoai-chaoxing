@@ -2,8 +2,8 @@
 // @name         小哀学习通助手（自有AI·自动答题/刷课）
 // @name:en      XiaoAi Chaoxing Assistant
 // @namespace    xiaoai.chaoxing
-// @version      1.1.0
-// @description  学习通/超星全自动助手：自带 API Key 直连 AI（默认 deepseek-v4-flash），自动完成视频/音频/文档/阅读/读书/直播/速课/测验/作业/考试；支持单选/多选/判断/填空/简答/论述/写作/翻译/编程/复合大题；字体解密、防清进度、拟人化答题、答案加粗好学生模式。在设置面板填入你的 API Key 即可使用。
+// @version      1.2.0
+// @description  学习通/超星全自动助手：自带 API Key 直连 AI（默认 deepseek-flash），自动完成视频/音频/文档/阅读/读书/直播/速课/测验/作业/考试；支持单选/多选/判断/填空/简答/论述/写作/翻译/编程/复合大题；字体解密、防清进度、拟人化答题、答案加粗好学生模式。在设置面板填入你的 API Key 即可使用。
 // @author       小哀
 // @tag          学习通
 // @tag          超星
@@ -14,6 +14,8 @@
 // @tag          考试
 // @tag          deepseek
 // @tag          openai
+// @homepageURL  https://github.com/lyjx29/xiaoai-chaoxing
+// @supportURL   https://github.com/lyjx29/xiaoai-chaoxing/issues
 // @license      MIT
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDE2IDE2Ij48dGV4dCB4PSIwIiB5PSIxMyIgZm9udC1zaXplPSIxNCI+5bCP5oK8PC90ZXh0Pjwvc3ZnPg==
 // @match        *://*.chaoxing.com/*
@@ -29,6 +31,9 @@
 // @match        *://*.hnvist.cn/*
 // @match        *://*.fjlecb.cn/*
 // @match        *://*.qutjxjy.cn/*
+// @connect      localhost
+// @connect      127.0.0.1
+// @connect      *
 // @connect      api.deepseek.com
 // @connect      api.openai.com
 // @connect      api.anthropic.com
@@ -3945,7 +3950,7 @@
     var _w = unsafeWindow,
         _l = location,
         _d = _w.document,
-        $ = _w.jQuery || top.jQuery;
+        $ = typeof jQuery !== 'undefined' ? jQuery : _w.jQuery;
     var Core = (typeof unsafeWindow !== 'undefined' && unsafeWindow.XiaoAiCore) ||
         (typeof self !== 'undefined' && self.XiaoAiCore) ||
         (typeof window !== 'undefined' && window.XiaoAiCore) || {};
@@ -3964,9 +3969,10 @@
         // ---- AI 服务 ----
         baseURL: 'https://api.deepseek.com',   // OpenAI 兼容端点，自动补全 /chat/completions
         apiKey: '',                             // 用户自填
-        model: 'deepseek-v4-flash',             // 模型名
+        model: 'deepseek-flash',                // 模型名（已保存的用户配置保持不变）
         temperature: 0.2,
-        maxTokens: 1500,
+        maxTokens: 4096,
+        deepseekThinking: 0,                    // 官方 DeepSeek 默认关闭思考，避免短输出预算只生成思考过程
         jsonMode: 1,                            // 1=让 AI 输出 JSON(宽松解析) 0=纯文本
         requestInterval: 0,                     // AI 请求最小间隔(秒)
         reqTimeout: 120,                        // 单次请求超时(秒)
@@ -4005,6 +4011,9 @@
 
     /* =========================== 存储（GM + 域名隔离） =========================== */
     var Storage = {
+        _isSecret: function (key) {
+            return key === 'GPTJsSetting.apiKey' || key === 'GPTJsSetting.password';
+        },
         _prefix: function () {
             try {
                 var host = _l.hostname;
@@ -4015,6 +4024,18 @@
         get: function (key, def) {
             var v = undefined;
             try { v = GM_getValue(this._prefix() + key); } catch (e) { /* ignore */ }
+            if (this._isSecret(key)) {
+                // 仅从旧网页存储迁移一次；密钥以后只保留在脚本管理器中。
+                try {
+                    var legacy = _w.localStorage.getItem(key);
+                    if ((v === undefined || v === null) && legacy !== null) {
+                        GM_setValue(this._prefix() + key, legacy);
+                        v = legacy;
+                    }
+                    _w.localStorage.removeItem(key);
+                } catch (e) { /* 保留旧值，存储恢复后再迁移 */ }
+                return v === undefined || v === null ? def : v;
+            }
             if (v === undefined || v === null) {
                 try {
                     var lv = _w.localStorage.getItem(key);
@@ -4026,6 +4047,10 @@
         },
         set: function (key, val) {
             try { GM_setValue(this._prefix() + key, String(val)); } catch (e) { /* ignore */ }
+            if (this._isSecret(key)) {
+                try { _w.localStorage.removeItem(key); } catch (e) { /* ignore */ }
+                return;
+            }
             try { _w.localStorage.setItem(key, String(val)); } catch (e) { /* ignore */ }
         },
         getBool: function (key, def) {
@@ -4096,7 +4121,7 @@
      *           debugLog 静默、不持久化、不占存储。
      * 更新检测时请置 true，发布前务必改回 false。
      */
-    var DEV_MODE = true;
+    var DEV_MODE = false;
     // 允许运行时覆盖（测试/高级用法）：在脚本加载前设置 window.__XIAOAI_DEV_MODE__ = true
     try {
         if ((typeof unsafeWindow !== 'undefined' && unsafeWindow.__XIAOAI_DEV_MODE__) ||
@@ -4250,7 +4275,7 @@
             var path = _l.pathname;
             var selectors = [];
             if (path.indexOf('/mooc2/work/dowork') !== -1) {
-                selectors = ['.mark_table', '.mark_table form', '.questionLi', '.stem_answer .answer_p',
+                selectors = ['.mark_table', '.mark_table form', '.questionLi', '.stem_answer .answer_p', '.answerBg .answer_p',
                     '.stem_answer textarea', 'textarea[name^="answerEditor"]', '.reading_answer', '.CodeMirror', '.subEditor textarea'];
             } else if (path.indexOf('/work/phone') !== -1) {
                 selectors = ['.Py-mian1', '.Py-m1-title', '.answerList li', '.answerList.singleChoice li',
@@ -4370,11 +4395,15 @@
         _w.__xiaoaiExportReportTxt = function () { return Report.exportTxt(); };
     } catch (e) { /* ignore */ }
 
-    /* =========================== 设置读写（GM + localStorage 双写） =========================== */
+    /* =========================== 设置读写（敏感信息仅存 GM） =========================== */
     function getSetting(key, def) { return Storage.get('GPTJsSetting.' + key, def); }
     function setSetting(key, val) { Storage.set('GPTJsSetting.' + key, val); }
     function getSettingBool(key, def) { return Storage.getBool('GPTJsSetting.' + key, def); }
     function setSettingBool(key, val) { setSetting(key, val ? 'true' : 'false'); }
+
+    // 即使当前页面不需要 AI，也及时清理旧版遗留的网页密钥/密码。
+    getSetting('apiKey', '');
+    getSetting('password', '');
 
     // 读取 AI 配置
     function aiConfig() {
@@ -4384,6 +4413,7 @@
             model: getSetting('model', CONFIG.model),
             temperature: parseFloat(getSetting('temperature', CONFIG.temperature)),
             maxTokens: parseInt(getSetting('maxTokens', CONFIG.maxTokens), 10),
+            deepseekThinking: getSettingBool('deepseekThinking', !!CONFIG.deepseekThinking),
             jsonMode: getSettingBool('jsonMode', !!CONFIG.jsonMode),
             requestInterval: parseInt(getSetting('requestInterval', CONFIG.requestInterval), 10),
             reqTimeout: parseInt(getSetting('reqTimeout', CONFIG.reqTimeout), 10)
@@ -4432,16 +4462,31 @@
         var nextAllowedAt = 0;
         var MAX_RETRIES = 2;
 
-        // 归一化 endpoint：自动补全 /chat/completions
-        function normalizeEndpoint(ep) {
-            ep = (ep || '').trim().replace(/\/+$/, '');
-            if (/chat\/completions$/i.test(ep) || /completions$/i.test(ep)) return ep;
-            if (/\/v\d+$/i.test(ep)) return ep + '/chat/completions';
-            return ep + '/v1/chat/completions';
+        // 协议由地址判断，OpenAI 兼容网关中的 Claude 模型仍使用 chat/completions。
+        function isAnthropic(cfg) {
+            var url = new URL(cfg.baseURL.trim());
+            if (/\/(?:chat\/completions|completions)\/?$/i.test(url.pathname)) return false;
+            return /(^|\.)anthropic\.com$/i.test(url.hostname) ||
+                /\/(?:anthropic|messages)(?:\/|$)/i.test(url.pathname);
         }
 
-        function isAnthropic(cfg) {
-            return /anthropic|claude/i.test(cfg.baseURL) || /claude/i.test(cfg.model);
+        function normalizeEndpoint(ep, anthropic) {
+            var url = new URL((ep || '').trim());
+            if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.hash) {
+                throw new Error('invalid endpoint');
+            }
+            var path = url.pathname.replace(/\/+$/, '');
+            var suffix = anthropic ? '/messages' : '/chat/completions';
+            var complete = anthropic ? /\/messages$/i : /\/chat\/completions$/i;
+            if (/\/models$/i.test(path) || (!anthropic && /\/completions$/i.test(path) && !complete.test(path))) {
+                path = path.replace(/\/(?:models|completions)$/i, suffix);
+            } else if (!complete.test(path)) {
+                // 保留 /beta、网关前缀等显式路径，只有根地址补 /v1。
+                var prefix = !path || (anthropic && /\/anthropic$/i.test(path)) ? '/v1' : '';
+                path += prefix + suffix;
+            }
+            url.pathname = path;
+            return url.href;
         }
 
         function buildMessages(promptObj) {
@@ -4456,126 +4501,130 @@
             var cfg = aiConfig();
 
             return new Promise(function (resolve, reject) {
-                if (!cfg.apiKey) {
+                var endpoint, anthropic;
+                try {
+                    anthropic = isAnthropic(cfg);
+                    endpoint = normalizeEndpoint(cfg.baseURL, anthropic);
+                } catch (e) {
+                    return reject({ c: -11, msg: 'Base URL 无效，请填写完整的 http(s) 地址' });
+                }
+                var local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(endpoint).hostname);
+                if (!String(cfg.apiKey || '').trim() && !local) {
                     return reject({ c: -10, msg: '未配置 API Key，请在设置面板填写' });
                 }
 
-                // 节流
                 var intervalMs = Math.min(60000, Math.max(0, (cfg.requestInterval || 0)) * 1000);
                 var nowTs = Date.now();
                 var waitMs = Math.max(0, nextAllowedAt - nowTs);
                 nextAllowedAt = Math.max(nowTs, nextAllowedAt) + intervalMs;
+                var timeoutMs = Math.min(600, Math.max(5, cfg.reqTimeout || 120)) * 1000;
+                var requestDone = false, watchdog = null, request = null;
 
-                var requestDone = false;
-                var longWaitTimer = null;
-                var timeoutMs = (cfg.reqTimeout || 120) * 1000;
-
-                // 看门狗：请求在 timeoutMs 内未完成则重试（ontimeout 通常先触发，此为兜底）
-                longWaitTimer = setTimeout(function () {
-                    if (!requestDone) {
-                        requestDone = true;
-                        if (retryCount < MAX_RETRIES) {
-                            logger('请求超时重试（第' + (retryCount + 1) + '次）', 'orange');
-                            ask(promptObj, retryCount + 1).then(resolve).catch(reject);
-                        } else {
-                            reject({ c: 666, msg: '请求超时（已重试 ' + MAX_RETRIES + ' 次）' });
-                        }
-                    }
-                }, timeoutMs + 30000 + waitMs);
+                function finish(error, answer, retryable, retryAfter) {
+                    if (requestDone) return;
+                    requestDone = true;
+                    clearTimeout(watchdog);
+                    if (retryable && retryCount < MAX_RETRIES) {
+                        var delay = Math.max(1000 * Math.pow(2, retryCount), retryAfter || 0);
+                        logger('AI 请求暂时失败，' + Math.ceil(delay / 1000) + ' 秒后重试（第' + (retryCount + 1) + '次）', 'orange');
+                        setTimeout(function () {
+                            ask(promptObj, retryCount + 1).then(resolve, reject);
+                        }, delay);
+                    } else if (error) reject(error);
+                    else resolve(answer);
+                }
 
                 setTimeout(function () {
-                    if (requestDone) return;
-
-                    var endpoint = isAnthropic(cfg)
-                        ? (cfg.baseURL.trim().replace(/\/+$/, '') + '/messages')
-                        : normalizeEndpoint(cfg.baseURL);
-
-                    var body;
                     var headers = { 'Content-Type': 'application/json' };
-                    if (isAnthropic(cfg)) {
-                        headers['x-api-key'] = cfg.apiKey;
+                    var temp = promptObj.temperature !== undefined ? promptObj.temperature : cfg.temperature;
+                    var body = {
+                        model: cfg.model,
+                        max_tokens: Math.min(131072, Math.max(1, cfg.maxTokens || CONFIG.maxTokens)),
+                        temperature: isFinite(temp) ? temp : 0.2,
+                        messages: buildMessages(promptObj)
+                    };
+                    if (anthropic) {
+                        headers['x-api-key'] = String(cfg.apiKey).trim();
                         headers['anthropic-version'] = '2023-06-01';
-                        body = JSON.stringify({
-                            model: cfg.model,
-                            max_tokens: Math.max(cfg.maxTokens, 1024),
-                            temperature: cfg.temperature,
-                            messages: [{ role: 'user', content: promptObj.user }],
-                            system: promptObj.system || ''
-                        });
-                    } else {
-                        headers['Authorization'] = 'Bearer ' + cfg.apiKey;
-                        // 允许按题型覆盖温度（客观题传 0 以降低随机性）
-                        var temp = promptObj.temperature !== undefined ? promptObj.temperature : cfg.temperature;
-                        body = JSON.stringify({
-                            model: cfg.model,
-                            messages: buildMessages(promptObj),
-                            temperature: temp,
-                            max_tokens: cfg.maxTokens
-                        });
+                        delete body.temperature; // 由 Anthropic 模型使用其支持的默认采样参数
+                        body.system = promptObj.system || '';
+                        body.messages = [{ role: 'user', content: promptObj.user }];
+                    } else if (String(cfg.apiKey || '').trim()) {
+                        headers['Authorization'] = 'Bearer ' + String(cfg.apiKey).trim();
                     }
 
-                    GM_xmlhttpRequest({
-                        method: 'POST',
-                        url: endpoint,
-                        headers: headers,
-                        data: body,
-                        timeout: timeoutMs,
-                        onload: function (xhr) {
-                            if (requestDone) return;
-                            requestDone = true;
-                            clearTimeout(longWaitTimer);
-                            if (xhr.status === 200) {
-                                try {
-                                    var obj = JSON.parse(xhr.responseText);
-                                    var msg = (obj.choices && obj.choices[0] && obj.choices[0].message) ||
-                                        (obj.content && obj.content[0] && obj.content[0].text ? { content: obj.content[0].text } : null) ||
-                                        {};
-                                    var answer = msg.content || msg.reasoning_content || '';
-                                    if (answer) {
-                                        resolve(answer);
-                                    } else {
-                                        reject({ c: 0, msg: 'AI 返回空答案' });
+                    var hostname = new URL(endpoint).hostname;
+                    if (/^api\.deepseek\.com$/i.test(hostname)) {
+                        body.thinking = { type: cfg.deepseekThinking ? 'enabled' : 'disabled' };
+                    }
+                    if (!anthropic && (/^api\.openai\.com$/i.test(hostname) || /^(?:o[1-9](?:-|$)|gpt-[5-9](?:[.-]|$))/i.test(cfg.model))) {
+                        body.max_completion_tokens = body.max_tokens;
+                        delete body.max_tokens;
+                        if (/^(?:o[1-9](?:-|$)|gpt-[5-9](?:[.-]|$))/i.test(cfg.model)) delete body.temperature;
+                    }
+
+                    watchdog = setTimeout(function () {
+                        finish({ c: 666, msg: '请求超时（最多重试 ' + MAX_RETRIES + ' 次）' }, null, true);
+                        try { if (request && request.abort) request.abort(); } catch (e) { /* ignore */ }
+                    }, timeoutMs + 1000);
+                    try {
+                        request = GM_xmlhttpRequest({
+                            method: 'POST', url: endpoint, headers: headers,
+                            data: JSON.stringify(body), timeout: timeoutMs, anonymous: true,
+                            onload: function (xhr) {
+                                if (requestDone) return;
+                                if (xhr.status >= 200 && xhr.status < 300) {
+                                    var obj;
+                                    try { obj = JSON.parse(xhr.responseText); }
+                                    catch (e) { return finish({ c: -1, msg: 'JSON 解析失败，请检查接口地址是否为 API' }); }
+                                    var choice = obj.choices && obj.choices[0];
+                                    var content = anthropic ? obj.content : choice && choice.message && choice.message.content;
+                                    if ((anthropic && obj.stop_reason === 'max_tokens') || (choice && choice.finish_reason === 'length')) {
+                                        return finish({ c: -12, msg: 'AI 输出被截断，请提高最大输出 Token 数' });
                                     }
-                                } catch (e) {
-                                    reject({ c: -1, msg: 'JSON 解析失败' });
+                                    if (Array.isArray(content)) {
+                                        content = content.filter(function (part) { return part.type === 'text'; })
+                                            .map(function (part) { return part.text || ''; }).join('\n');
+                                    }
+                                    // reasoning_content/思考块不是最终答案，不得用于填题。
+                                    if (typeof content !== 'string' || !content.trim()) {
+                                        return finish({ c: 0, msg: 'AI 未返回最终答案，请检查模型与输出 Token 限制' });
+                                    }
+                                    return finish(null, content.trim());
                                 }
-                            } else if (xhr.status === 401 || xhr.status === 403) {
-                                reject({ c: xhr.status, msg: 'API Key 无效或权限不足 (' + xhr.status + ')' });
-                            } else if (xhr.status === 429) {
-                                reject({ c: 429, msg: '请求过于频繁，请降低速率或稍后再试' });
-                            } else if (xhr.status === 400) {
-                                // 400 不修改全局配置，交由 getAnswer 层做一次性降级重试
-                                reject({ c: 400, msg: '请求参数错误 (400)，请检查 Base URL/模型名/参数' });
-                            } else {
-                                reject({ c: xhr.status, msg: 'HTTP ' + xhr.status });
+                                if (xhr.status === 401 || xhr.status === 403) {
+                                    return finish({ c: xhr.status, msg: 'API Key 无效或权限不足 (' + xhr.status + ')' });
+                                }
+                                var retryAfter = 0;
+                                var match = String(xhr.responseHeaders || '').match(/^retry-after:\s*(.+)$/im);
+                                if (match) {
+                                    var seconds = Number(match[1].trim());
+                                    retryAfter = isFinite(seconds) ? seconds * 1000 : Date.parse(match[1]) - Date.now();
+                                    retryAfter = Math.min(60000, Math.max(0, retryAfter || 0));
+                                }
+                                finish({ c: xhr.status, msg: xhr.status === 429 ? '请求限流，重试后仍失败，请增大请求间隔' :
+                                    xhr.status === 400 ? '请求参数错误 (400)，请检查 Base URL/模型名/参数' : 'HTTP ' + xhr.status },
+                                    null, xhr.status === 429 || xhr.status >= 500 && xhr.status <= 599, retryAfter);
+                            },
+                            onerror: function () {
+                                finish({ c: -2, msg: '网络错误，请检查 Base URL、网络或脚本管理器跨域权限' }, null, true);
+                            },
+                            ontimeout: function () {
+                                finish({ c: 666, msg: '请求超时（最多重试 ' + MAX_RETRIES + ' 次）' }, null, true);
+                            },
+                            onabort: function () {
+                                finish({ c: -3, msg: '请求已取消' });
                             }
-                        },
-                        onerror: function () {
-                            if (requestDone) return;
-                            requestDone = true;
-                            clearTimeout(longWaitTimer);
-                            reject({ c: -2, msg: '网络错误，请检查 Base URL 或网络' });
-                        },
-                        ontimeout: function () {
-                            if (requestDone) return;
-                            requestDone = true;
-                            clearTimeout(longWaitTimer);
-                            if (retryCount < MAX_RETRIES) {
-                                logger('请求超时，重试（第' + (retryCount + 1) + '次）', 'orange');
-                                ask(promptObj, retryCount + 1).then(resolve).catch(reject);
-                            } else {
-                                reject({ c: 666, msg: '请求超时（已重试 ' + MAX_RETRIES + ' 次）' });
-                            }
-                        }
-                    });
+                        });
+                    } catch (e) {
+                        finish({ c: -2, msg: '请求未能发出，请检查脚本管理器跨域权限' });
+                    }
                 }, waitMs);
             });
         }
 
         // 测试连接
         function test() {
-            var cfg = aiConfig();
-            if (!cfg.apiKey) return Promise.reject({ msg: '请先填写 API Key' });
             var p = Core.PromptBuilder.build({ type: 3, typeName: '判断题', question: '这是一条连接测试消息' });
             return ask(p, 0);
         }
@@ -5165,9 +5214,34 @@
      *  场景适配器 — 每个只提供该场景特有的 DOM 选择器
      * =================================================================== */
 
+    function readPlatformType($timu) {
+        var $inputs = $timu.find('input').filter(function () {
+            return /^(?:answertype|type)\d*$/i.test(this.name || '') ||
+                /^(?:answertype|type)\d*$/i.test(this.id || '');
+        });
+        var $numbered = $inputs.filter(function () {
+            return /^(?:answertype|type)\d+$/i.test(this.name || '') ||
+                /^(?:answertype|type)\d+$/i.test(this.id || '');
+        });
+        var input = ($numbered.length ? $numbered : $inputs)[0];
+        if (!input || !/^\d+$/.test(input.value.trim())) return null;
+        var types = {
+            0: [0, '单选题'], 1: [1, '多选题'], 2: [2, '填空题'], 3: [3, '判断题'],
+            4: [4, '简答题'], 5: [4, '名词解释'], 6: [4, '论述题'],
+            7: [7, '计算题'], 8: [4, '其他题'], 9: [4, '分录题'], 10: [4, '资料题'],
+            14: [6, '完形填空'], 15: [6, '阅读理解'], 17: [9, '编程题']
+        };
+        var value = Number(input.value);
+        var info = types[value];
+        // 连线等未支持题型明确跳过，避免降级成简答填错控件。
+        return info ? { type: info[0], typeName: info[1] } : { type: undefined, typeName: '平台题型 ' + value };
+    }
+
     // ---- Phone Adapter（手机版测验 /work/phone/work） ----
     var PhoneAdapter = {
         getType: function ($timu) {
+            var platformType = readPlatformType($timu);
+            if (platformType) return platformType;
             var full = $timu.find('.Py-m1-title').html() || '';
             var m = full.match(/.*?\[(.*?)]/);
             var typeName = m ? m[1] : '未知';
@@ -5266,10 +5340,12 @@
     // ---- Homework Adapter（作业 /mooc2/work/dowork） ----
     var HomeworkAdapter = {
         getType: function ($timu) {
+            var platformType = readPlatformType($timu);
+            if (platformType) return platformType;
             var typeName = $timu.attr('typename') || '';
             var type = Core.mapTypeName(typeName);
             if (type === undefined) {
-                var $opts = $timu.find('.stem_answer .answer_p');
+                var $opts = $timu.find('.stem_answer .answer_p, .answerBg .answer_p');
                 if ($opts.length > 0) {
                     var hasCheckbox = $timu.find('.stem_answer input[type="checkbox"]').length > 0;
                     type = hasCheckbox ? 1 : 0;
@@ -5291,7 +5367,7 @@
             return Core.tidyQuestion(Core.textifyMedia(full)).replace(/^[(].*?[)]/, '');
         },
         getOptions: function ($timu, type) {
-            var $opts = $timu.find('.stem_answer .answer_p');
+            var $opts = $timu.find('.stem_answer .answer_p, .answerBg .answer_p');
             if ($opts.length === 0) return [];
             var opts = [];
             $opts.each(function () { opts.push(Core.normalizeOptionText($(this).html())); });
@@ -5306,14 +5382,14 @@
             });
         },
         selectOption: function ($timu, index) {
-            var $opt = $timu.find('.stem_answer .answer_p').eq(index);
+            var $opt = $timu.find('.stem_answer .answer_p, .answerBg .answer_p').eq(index);
             if ($opt.length) {
                 var cls = $opt.parent().find('span').attr('class') || '';
                 if (cls.indexOf('check_answer') === -1) { try { $opt.parent().click(); } catch (e) {} }
             }
         },
         highlightOption: function ($timu, index) {
-            $timu.find('.stem_answer .answer_p').eq(index).parent().find('span').css('font-weight', 'bold');
+            $timu.find('.stem_answer .answer_p, .answerBg .answer_p').eq(index).parent().find('span').css('font-weight', 'bold');
         },
         showAnswerInTitle: function ($timu, answer) {
             var $title = $timu.find('.mark_name');
@@ -5353,12 +5429,14 @@
     // ---- Exam Adapter（考试逐题模式 /exam/test/reVersionTestStartNew） ----
     var ExamAdapter = {
         getType: function ($timu) {
+            var platformType = readPlatformType($timu);
+            if (platformType) return platformType;
             var full = ($timu.find('h3.mark_name').html() || '').trim();
             var m = full.match(/[(](.*?),.*?分[)]/);
             var typeName = m ? m[1] : '未知';
             var type = Core.mapTypeName(typeName);
             if (type === undefined) {
-                var $opts = $timu.find('#submitTest .stem_answer .clearfix.answerBg .fl.answer_p');
+                var $opts = $timu.find('#submitTest .stem_answer .answer_p, .answerBg .answer_p');
                 if ($opts.length > 0) {
                     var hasCheckbox = $timu.find('#submitTest .stem_answer input[type="checkbox"]').length > 0;
                     type = hasCheckbox ? 1 : 0;
@@ -5379,7 +5457,7 @@
             return Core.tidyQuestion(Core.textifyMedia(full.replace(/[(].*?分[)]/, '')));
         },
         getOptions: function ($timu, type) {
-            var $opts = $timu.find('#submitTest .stem_answer .clearfix.answerBg .fl.answer_p');
+            var $opts = $timu.find('#submitTest .stem_answer .answer_p, .answerBg .answer_p');
             if ($opts.length === 0) return [];
             var opts = [];
             $opts.each(function () { opts.push(Core.normalizeOptionText($(this).html())); });
@@ -5394,14 +5472,14 @@
             });
         },
         selectOption: function ($timu, index) {
-            var $opt = $timu.find('#submitTest .stem_answer .clearfix.answerBg .fl.answer_p').eq(index);
+            var $opt = $timu.find('#submitTest .stem_answer .answer_p, .answerBg .answer_p').eq(index);
             if ($opt.length) {
                 var cls = $opt.parent().find('span').attr('class') || '';
                 if (cls.indexOf('check_answer') === -1) { try { $opt.parent().click(); } catch (e) {} }
             }
         },
         highlightOption: function ($timu, index) {
-            $timu.find('#submitTest .stem_answer .clearfix.answerBg .fl.answer_p').eq(index).parent().find('span').css('font-weight', 'bold');
+            $timu.find('#submitTest .stem_answer .answer_p, .answerBg .answer_p').eq(index).parent().find('span').css('font-weight', 'bold');
         },
         showAnswerInTitle: function ($timu, answer) {
             var $title = $timu.find('h3.mark_name');
@@ -5437,6 +5515,8 @@
     // ---- Exam Preview Adapter（整卷预览 /mooc2/exam/preview） ----
     var ExamPreviewAdapter = {
         getType: function ($timu) {
+            var platformType = readPlatformType($timu);
+            if (platformType) return platformType;
             var typeName = $timu.attr('typename') || '';
             var type = Core.mapTypeName(typeName);
             if (type !== undefined) return { type: type, typeName: typeName };
@@ -5522,6 +5602,8 @@
     // ---- Pc Quiz Adapter（旧版 PC 测验 /knowledge/cards） ----
     var PcQuizAdapter = {
         getType: function ($timu) {
+            var platformType = readPlatformType($timu);
+            if (platformType) return platformType;
             var questionFull = $timu.find('.Zy_TItle.clearfix > div').html() || '';
             var m = questionFull.match(/^【(.*?)】/);
             var typeName = m ? m[1] : '未知';
@@ -5622,7 +5704,7 @@
         }
 
         var $options = $subQ.find('.answerBg .answer_p');
-        if ($options.length === 0) $options = $subQ.find('.stem_answer .answer_p');
+        if ($options.length === 0) $options = $subQ.find('.stem_answer .answer_p, .answerBg .answer_p');
         var options = [];
         $options.each(function () { options.push(Core.normalizeOptionText($(this).html())); });
 
@@ -7003,7 +7085,9 @@
                 '<div class="ne21-sec">AI 服务</div>' +
                 '<input id="GPTJsSetting.baseURL" class="ne21-input" placeholder="Base URL，如 https://api.deepseek.com">' +
                 '<input id="GPTJsSetting.apiKey" class="ne21-input" type="password" placeholder="API Key" autocomplete="new-password">' +
-                '<input id="GPTJsSetting.model" class="ne21-input" placeholder="模型名，如 deepseek-v4-flash">' +
+                '<input id="GPTJsSetting.model" class="ne21-input" placeholder="模型名，如 deepseek-flash">' +
+                '<label title="仅用于官方 DeepSeek 接口；开启后建议增大输出上限"><input type="checkbox" id="GPTJsSetting.deepseekThinking">DeepSeek 深度思考</label>' +
+                '<label><input type="number" id="GPTJsSetting.maxTokens" class="ne21-input" min="256" max="131072" step="256" style="width:90px;">最大输出 Token</label>' +
                 '<label><select id="GPTJsSetting.rate" class="ne21-input" style="min-width:80px;width:auto;">' +
                 '<option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option>' +
                 '<option value="4">4×</option><option value="8">8×</option><option value="16">16×</option>' +
@@ -7111,12 +7195,12 @@
             $box.on('click', '#testApiBtn', function () {
                 logger('正在测试 API 连接...', 'purple');
                 ApiClient.test().then(function (ans) {
-                    logger('API 连接成功，返回: ' + (ans || '').slice(0, 40), 'green');
+                    logger('API 连接成功，返回: ' + escapeHtml((ans || '').slice(0, 40)), 'green');
                     var cfg = aiConfig();
-                    $('#userInfo').html('API 连接成功<br>BaseURL: ' + cfg.baseURL + '<br>模型: ' + cfg.model + '<br>返回: ' + (ans || '').slice(0, 60));
+                    $('#userInfo').html('API 连接成功<br>BaseURL: ' + escapeHtml(cfg.baseURL) + '<br>模型: ' + escapeHtml(cfg.model) + '<br>返回: ' + escapeHtml((ans || '').slice(0, 60)));
                 }).catch(function (e) {
-                    logger('API 连接失败: ' + (e.msg || e.c || '未知'), 'red');
-                    $('#userInfo').html('API 连接失败: ' + (e.msg || ''));
+                    logger('API 连接失败: ' + escapeHtml(e.msg || e.c || '未知'), 'red');
+                    $('#userInfo').text('API 连接失败: ' + (e.msg || ''));
                 });
             });
 
@@ -7127,7 +7211,7 @@
         },
 
         _initSettings: function () {
-            var checkboxes = ['sub', 'force', 'examTurn', 'goodStudent', 'alterTitle', 'redo', 'randomDo', 'fuzzyMatch', 'useCache', 'decrypt', 'antiDetect', 'jsonMode'];
+            var checkboxes = ['sub', 'force', 'examTurn', 'goodStudent', 'alterTitle', 'redo', 'randomDo', 'fuzzyMatch', 'useCache', 'decrypt', 'antiDetect', 'jsonMode', 'deepseekThinking'];
             checkboxes.forEach(function (id) {
                 var cb = document.getElementById('GPTJsSetting.' + id);
                 if (!cb) return;
@@ -7142,6 +7226,17 @@
                 el.value = getSetting(id, CONFIG[id]);
                 el.addEventListener('change', function () { setSetting(id, el.value); });
             });
+
+            var tokensInput = document.getElementById('GPTJsSetting.maxTokens');
+            if (tokensInput) {
+                tokensInput.value = getSetting('maxTokens', CONFIG.maxTokens);
+                tokensInput.addEventListener('change', function () {
+                    var value = parseInt(tokensInput.value, 10);
+                    value = isFinite(value) ? Math.min(131072, Math.max(256, value)) : CONFIG.maxTokens;
+                    tokensInput.value = String(value);
+                    setSetting('maxTokens', value);
+                });
+            }
 
             var rateSelect = document.getElementById('GPTJsSetting.rate');
             if (rateSelect) {
@@ -7206,9 +7301,15 @@
             try { return GM_info.script.version || '0.0.0'; } catch (e) { return '0.0.0'; }
         },
 
-        _toNum: function (v) {
-            var m = String(v).match(/(\d+)\.(\d+)\.(\d+)/);
-            return m ? (+m[1]) * 10000 + (+m[2]) * 100 + (+m[3]) : 0;
+        _isNewer: function (latest, current) {
+            var pattern = /^v?(\d+)\.(\d+)\.(\d+)$/;
+            var a = String(latest).match(pattern);
+            var b = String(current).match(pattern) || ['0.0.0', '0', '0', '0'];
+            if (!a) return false; // 不把预发布版或任意文本当作稳定更新
+            for (var i = 1; i <= 3; i++) {
+                if (+a[i] !== +b[i]) return +a[i] > +b[i];
+            }
+            return false;
         },
 
         // 检测 GitHub 最新版本；每 12 小时查一次，避免频繁请求
@@ -7219,6 +7320,9 @@
                     this._renderNotice();
                     return;
                 }
+                // 404（尚未发布 Release）和网络失败也限频，避免每个 iframe 重复请求。
+                Storage.set('updateChecked', String(Date.now()));
+                this._renderNotice();
                 GM_xmlhttpRequest({
                     method: 'GET',
                     url: 'https://api.github.com/repos/' + this.REPO + '/releases/latest',
@@ -7230,7 +7334,7 @@
                                 var obj = JSON.parse(xhr.responseText);
                                 var latest = obj.tag_name || '';
                                 Storage.set('updateChecked', String(Date.now()));
-                                if (latest && Updater._toNum(latest) > Updater._toNum(Updater.currentVersion())) {
+                                if (!obj.draft && !obj.prerelease && Updater._isNewer(latest, Updater.currentVersion())) {
                                     Storage.set('updateAvailable', latest);
                                 } else {
                                     Storage.set('updateAvailable', '');
@@ -7247,12 +7351,16 @@
 
         _renderNotice: function () {
             var latest = Storage.get('updateAvailable', '');
-            if (!latest) return;
             try {
                 var $notice = $('#ne-21notice');
+                if (!this._isNewer(latest, this.currentVersion())) {
+                    $notice.find('.xiaoai-update').remove();
+                    Storage.set('updateAvailable', '');
+                    return;
+                }
                 if ($notice.length && $notice.find('.xiaoai-update').length === 0) {
                     $notice.append(
-                        '<div class="xiaoai-update">发现新版本 <b>' + latest + '</b>（当前 v' + Updater.currentVersion() + '）' +
+                        '<div class="xiaoai-update">发现新版本 <b>' + escapeHtml(latest) + '</b>（当前 v' + escapeHtml(Updater.currentVersion()) + '）' +
                         '<a href="https://github.com/' + Updater.REPO + '/releases" target="_blank">查看更新</a></div>'
                     );
                     logger('发现新版本 ' + latest + '，可去项目页查看更新', 'green');

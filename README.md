@@ -4,7 +4,7 @@
 
 一个运行在 [脚本猫 ScriptCat](https://scriptcat.org) / Tampermonkey 上的 userscript。**完全自研重构**，综合了社区中多项成熟的思路与工程实践，并用**你自己的 API Key 直连大模型**作答，不依赖任何会失效的第三方题库或免费中转站。
 
-默认模型 `deepseek-v4-flash`，对大学题目准确率与成本都合适；也兼容任意 OpenAI 兼容端点（DeepSeek / OpenAI / Kimi / Ollama / 智谱…）。
+默认模型 `deepseek-flash`（已保存的模型设置不变）；也兼容任意 OpenAI 兼容端点（DeepSeek / OpenAI / Kimi / Ollama / 智谱…）。
 
 ---
 
@@ -43,11 +43,17 @@
 
 ---
 
+## v1.2.0 维护更新（2026-11-08）
+
+修复 AI 地址补全、Anthropic 多内容块读取、OpenAI 推理模型参数、Ollama 无 Key 本地连接，以及临时限流/服务错误重试。正式版默认关闭调试日志，API Key 与登录密码迁移到脚本管理器存储。新增平台数字题型识别，保留旧版文字识别。
+
+DeepSeek 旧名 `deepseek-v4-flash` 仍被官方接受，当前新装默认改为 `deepseek-flash`；思考模式显式关闭，可在设置中开启。核对依据、参考项目及验证边界见[维护报告](./docs/维护报告-2026-11-08.md)。
+
 ## 📦 安装（快速版）
 
 > 嫌简单？点这里看 [**小白超详细安装教程（含每一步截图说明 + FAQ）**](docs/安装教程-小白超详细版.md)，从零一步步手把手。
 
-1. **下载脚本文件**：打开 https://github.com/lyjx29/xiaoai-chaoxing → **Releases** → 找到 `小哀学习通助手.user.js` → **右键 → 链接另存为**，保存到桌面
+1. **下载脚本文件**：从[脚本猫发布页](https://scriptcat.org/zh-CN/script-show-page/7367)安装，或下载仓库 [`dist/小哀学习通助手.user.js`](./dist/小哀学习通助手.user.js) 后导入。GitHub Releases 仅在维护者发布版本标签后提供成品。
 2. **安装脚本管理器**：
    - Edge 浏览器：地址栏输入 `edge://extensions` → 左下角「获取 Microsoft Edge 扩展」→ 搜索「**脚本猫**」→ 获取
    - Chrome 浏览器：打开 https://chromewebstore.google.com 搜索「脚本猫」或「Tampermonkey」→ 添加
@@ -55,6 +61,8 @@
 3. **导入脚本**：把桌面上的 `小哀学习通助手.user.js` **直接拖进浏览器窗口** → 弹窗点「安装 / Install」
 4. **验证**：登录学习通，进入课程/作业页，右下角出现悬浮窗 = 成功
 5. **配置 AI**：点悬浮窗「设置」→ 填 **API Key**（[platform.deepseek.com](https://platform.deepseek.com) 创建）→ 点「测 API」→ 显示"连接成功"即可用
+
+> 自定义接口首次连接可能需要在脚本管理器里允许该域名跨域请求。新版声明 `@connect *` 以支持用户填写的接口，AI 请求仍只发往你配置的地址。
 
 > 💡 换服务商：Base URL 改成 `https://api.openai.com/v1`、`https://api.moonshot.cn/v1`、`http://127.0.0.1:11434/v1`（Ollama）等，模型名、Key 同步换对应平台的。
 
@@ -64,8 +72,10 @@
 
 | 设置 | 默认 | 说明 |
 |---|---|---|
-| Base URL / API Key / 模型名 | deepseek / — / v4-flash | AI 服务配置 |
+| Base URL / API Key / 模型名 | deepseek / — / deepseek-flash | AI 服务配置 |
 | 视频/音频倍速 | 1× | 最高 16× |
+| DeepSeek 深度思考 | 关 | 仅作用于官方 DeepSeek 接口；开启后建议增大输出上限 |
+| 最大输出 Token | 4096 | 思考与最终答案共用预算，截断会提示错误 |
 | AI 请求间隔 | 0s | 限速防封（遇到 429 调大） |
 | AI 确认次数 | 0 | 客观题额外询问次数取多数票，消除模型随机性。0=单次(最省)，1=问2次，2=问3次(最准) |
 | 答题覆盖率阈值 | 60% | 答题覆盖率达到才自动交卷，否则只保存 |
@@ -85,7 +95,7 @@
 项目自带 **65 项纯逻辑单测 + 27 项 jsdom 模拟 DOM 端到端测试**：
 
 ```bash
-npm install        # 安装 jsdom / jquery
+npm ci             # 按锁文件安装开发依赖（Node.js 20+）
 npm test           # 构建 + 全部测试
 ```
 

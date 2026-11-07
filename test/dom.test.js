@@ -27,8 +27,7 @@ function makeWindow(bodyHtml, pathname, devMode) {
     const dom = new JSDOM('<!DOCTYPE html><html><body>' + (bodyHtml || '') + '</body></html>', {
         url: 'https://mooc1.chaoxing.com' + (pathname || '/'),
         runScripts: 'dangerously',
-        pretendToBeVisual: true,
-        resources: 'usable'
+        pretendToBeVisual: true
     });
     const win = dom.window;
     // 覆盖 URL（pathname）
@@ -51,6 +50,8 @@ function makeWindow(bodyHtml, pathname, devMode) {
     if (devMode) win.__XIAOAI_DEV_MODE__ = true;
     // 加载 jQuery
     win.eval(jquerySrc);
+    // 模拟测试不访问真实课程接口。
+    win.jQuery.ajax = function () { return win.jQuery.Deferred().reject().promise(); };
     // 运行脚本
     win.eval(scriptSrc);
     return win;
